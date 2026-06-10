@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from ..backtest.engine import ET, daily_atr_series, rth_sessions
+from ..backtest.engine import ET, daily_atr_series, rth_sessions, size_micros
 from ..config import Config, PROJECT_ROOT
 from ..data.yahoo import YahooSource
 from ..strategies import build_strategies
@@ -36,7 +36,7 @@ def _signal_key(day, sig) -> str:
     return f"{day}:{sig.symbol}:{sig.strategy}"
 
 
-def run_cycle(cfg: Config, contracts: int, dry_run: bool = False,
+def run_cycle(cfg: Config, risk_frac: float, dry_run: bool = False,
               state_path: Path | None = None) -> int:
     """One polling cycle; returns number of new alerts sent."""
     state_path = state_path or PROJECT_ROOT / cfg.live.get("state_file", "live_state.json")
@@ -69,10 +69,15 @@ def run_cycle(cfg: Config, contracts: int, dry_run: bool = False,
                 key = _signal_key(today, sig)
                 if key in state["fired"]:
                     continue
-                qty = contracts
+                budget = risk_frac * cfg.account.trailing_drawdown
                 if sig.grade == "A+":
-                    qty = int(min(cfg.account.max_contracts, round(contracts * aplus_mult)))
-                send_alert(format_signal(sig, qty), cfg.live.get("webhook_env", "DISCORD_WEBHOOK_URL"), dry_run)
+                    budget *= aplus_mult
+                instr = cfg.instruments[sym]
+                micros = size_micros(budget, sig.risk_points * instr.point_value,
+                                     cfg.account.max_contracts)
+                if micros == 0:
+                    continue
+                send_alert(format_signal(sig, micros), cfg.live.get("webhook_env", "DISCORD_WEBHOOK_URL"), dry_run)
                 state["fired"].append(key)
                 sent += 1
     state["fired"] = state["fired"][-200:]
@@ -81,7 +86,7 @@ def run_cycle(cfg: Config, contracts: int, dry_run: bool = False,
     return sent
 
 
-def run_forever(cfg: Config, contracts: int, dry_run: bool = False) -> None:
+def run_forever(cfg: Config, risk_frac: float, dry_run: bool = False) -> None:
     interval = int(cfg.live.get("poll_interval_min", 15)) * 60
     print(f"[live] polling every {interval // 60}m for {cfg.live.get('instruments')}; "
           f"{'DRY RUN' if dry_run else 'alerts live'}")
@@ -90,7 +95,7 @@ def run_forever(cfg: Config, contracts: int, dry_run: bool = False) -> None:
         next_close = (int(now // interval) + 1) * interval + 30  # 30s after bar close
         time.sleep(max(1, next_close - now))
         try:
-            n = run_cycle(cfg, contracts, dry_run)
+            n = run_cycle(cfg, risk_frac, dry_run)
             stamp = datetime.now(timezone.utc).strftime("%H:%M")
             print(f"[live {stamp}Z] cycle done, {n} new alert(s)")
         except Exception as exc:

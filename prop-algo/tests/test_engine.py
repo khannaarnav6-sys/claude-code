@@ -96,30 +96,48 @@ def test_rth_sessions_filters_overnight():
         assert et.time.max() < pd.Timestamp("16:00").time()
 
 
-def _trade(day, pnl, lows, highs):
+def _trade(day, pnl, lows, highs, risk=200.0):
     ts = pd.Timestamp(f"{day} 15:00", tz="UTC")
     return TradeRecord(symbol="NQ", strategy="t", grade="A", side=1, day=day,
                        entry_time=ts, exit_time=ts, entry=0, exit=0,
                        exit_reason="target", pnl_per_contract=pnl,
-                       bar_low_pnl=lows, bar_high_pnl=highs)
+                       risk_per_contract=risk, bar_low_pnl=lows, bar_high_pnl=highs)
+
+
+def test_size_micros_granularity():
+    from propalgo.backtest.engine import size_micros
+    # $375 budget, $200/mini risk -> $20/micro -> 18 micros (1.8 minis)
+    assert size_micros(375.0, 200.0, max_contracts=10) == 18
+    assert size_micros(375.0, 200.0, max_contracts=1) == 10   # capped
+    assert size_micros(10.0, 200.0, max_contracts=10) == 0    # too wide
+    assert size_micros(375.0, 0.0, max_contracts=10) == 0     # degenerate
 
 
 def test_eval_sequence_pass_and_bust():
     rules = AccountRules(min_trading_days=1)
-    # +$800/contract winners: at 4 contracts that's +$3,200 -> pass in one trade
+    # risk 50% of DD = $1,250 budget; $200/mini risk -> 62 micros -> 6.2 minis
+    # +$800/contract -> +$4,960 -> pass in one trade
     win = _trade(date(2026, 1, 5), 800.0, [-100.0, 200.0], [100.0, 800.0])
-    attempts = run_eval_sequence([win], rules, base_contracts=4)
+    attempts = run_eval_sequence([win], rules, risk_frac=0.5)
     assert len(attempts) == 1 and attempts[0].passed
 
-    # -$700/contract loser at 4 contracts = -$2,800 -> bust mid-trade
-    lose = _trade(date(2026, 1, 6), -700.0, [-700.0], [50.0])
-    attempts = run_eval_sequence([lose], rules, base_contracts=4)
+    # excursion 3x the stated risk (gap through stop): 6.2 * -600 = -$3,720 -> bust
+    lose = _trade(date(2026, 1, 6), -600.0, [-600.0], [50.0])
+    attempts = run_eval_sequence([lose], rules, risk_frac=0.5)
     assert len(attempts) == 1 and not attempts[0].passed
 
 
 def test_eval_sequence_restarts_after_bust():
     rules = AccountRules(min_trading_days=1)
-    lose = _trade(date(2026, 1, 5), -700.0, [-700.0], [0.0])
+    lose = _trade(date(2026, 1, 5), -600.0, [-600.0], [0.0])
     win = _trade(date(2026, 1, 6), 800.0, [-100.0], [800.0])
-    attempts = run_eval_sequence([lose, win], rules, base_contracts=4)
+    attempts = run_eval_sequence([lose, win], rules, risk_frac=0.5)
     assert [a.passed for a in attempts] == [False, True]
+
+
+def test_eval_sequence_risk_sizing_survives_normal_stop():
+    """At 15% risk the same stop-out is a survivable -$375, not a bust."""
+    rules = AccountRules(min_trading_days=1)
+    lose = _trade(date(2026, 1, 5), -200.0, [-200.0], [0.0])
+    attempts = run_eval_sequence([lose], rules, risk_frac=0.15)
+    assert attempts == []  # eval still active, neither passed nor busted

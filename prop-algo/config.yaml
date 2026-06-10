@@ -49,8 +49,10 @@ strategies:
     target_r: 2.5
 
 sizing:
-  base_contracts: 4            # overridden by `montecarlo` sweep recommendation
-  aplus_multiplier: 1.5        # A+ signals sized up (capped at max_contracts)
+  risk_frac: 0.20              # per-trade risk as fraction of trailing DD;
+                               # 0.20 maximized P(pass) in the 2023-2026 sweep
+                               # -- re-tune with `montecarlo` as data grows
+  aplus_multiplier: 1.5        # A+ signals risk 1.5x the budget
 
 live:
   instruments: [NQ, ES]

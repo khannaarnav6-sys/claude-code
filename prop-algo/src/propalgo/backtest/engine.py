@@ -75,8 +75,19 @@ class TradeRecord:
     exit: float
     exit_reason: str
     pnl_per_contract: float            # $ after commission+slippage, 1 contract
+    risk_per_contract: float = 0.0     # |entry - stop| in $ for 1 (mini) contract
     bar_low_pnl: list[float] = field(default_factory=list)   # per-bar worst unrealized $/contract
     bar_high_pnl: list[float] = field(default_factory=list)  # per-bar best unrealized $/contract
+
+
+def size_micros(risk_budget: float, risk_per_contract: float, max_contracts: int) -> int:
+    """Contracts come in 0.1-mini steps because Apex allows 10 micros per mini.
+
+    Returns the position size in micro units (10 micros == 1 mini)."""
+    if risk_per_contract <= 0:
+        return 0
+    micros = int(risk_budget / (risk_per_contract / 10.0))
+    return max(0, min(micros, max_contracts * 10))
 
 
 def simulate_trade(session: pd.DataFrame, entry_idx: int, sig: Signal,
@@ -120,7 +131,8 @@ def simulate_trade(session: pd.DataFrame, entry_idx: int, sig: Signal,
         day=session.index[0].tz_convert(ET).date(),
         entry_time=session.index[entry_idx], exit_time=session.index[exit_i],
         entry=entry, exit=exit_price, exit_reason=exit_reason,
-        pnl_per_contract=pnl, bar_low_pnl=low_pnl, bar_high_pnl=high_pnl,
+        pnl_per_contract=pnl, risk_per_contract=abs(entry - sig.stop) * pv,
+        bar_low_pnl=low_pnl, bar_high_pnl=high_pnl,
     )
 
 
@@ -170,12 +182,14 @@ class EvalAttempt:
 
 
 def run_eval_sequence(trades: list[TradeRecord], rules: AccountRules,
-                      base_contracts: int, aplus_multiplier: float = 1.5) -> list[EvalAttempt]:
+                      risk_frac: float, aplus_multiplier: float = 1.5) -> list[EvalAttempt]:
     """Replay day-ordered trades through back-to-back eval attempts.
 
-    Sizing: base on A signals, base*multiplier on A+ (capped at max_contracts).
-    Once the target is hit but min trading days aren't met, later signals are
-    taken at 1 contract just to log days without risking the pass.
+    Sizing: each trade risks `risk_frac` of the trailing drawdown (A+ signals
+    risk `risk_frac * aplus_multiplier`), converted to micro-granular size via
+    the trade's stop distance. Once the target is hit but min trading days
+    aren't met, later signals drop to 1 micro to log days without risking the
+    pass.
     """
     attempts: list[EvalAttempt] = []
     tracker = EvalTracker(rules)
@@ -184,20 +198,23 @@ def run_eval_sequence(trades: list[TradeRecord], rules: AccountRules,
     for tr in sorted(trades, key=lambda t: t.entry_time):
         if start_day is None:
             start_day = tr.day
-        qty = base_contracts
+        budget = risk_frac * rules.trailing_drawdown
         if tr.grade == "A+":
-            qty = int(min(rules.max_contracts, round(base_contracts * aplus_multiplier)))
-        qty = max(1, min(qty, rules.max_contracts))
+            budget *= aplus_multiplier
+        micros = size_micros(budget, tr.risk_per_contract, rules.max_contracts)
         if tracker.target_pending():
-            qty = 1
+            micros = min(micros, 1)
+        if micros == 0:
+            continue  # stop too wide even for 1 micro at this budget
+        scale = micros / 10.0
         tracker.mark_trading_day(tr.day)
         n_trades += 1
         for lo, hi in zip(tr.bar_low_pnl, tr.bar_high_pnl):
-            if tracker.on_equity_extremes(tracker.balance + qty * lo,
-                                          tracker.balance + qty * hi) is EvalStatus.BUSTED:
+            if tracker.on_equity_extremes(tracker.balance + scale * lo,
+                                          tracker.balance + scale * hi) is EvalStatus.BUSTED:
                 break
         if tracker.status is EvalStatus.ACTIVE:
-            tracker.on_trade_closed(qty * tr.pnl_per_contract)
+            tracker.on_trade_closed(scale * tr.pnl_per_contract)
         if tracker.status is not EvalStatus.ACTIVE:
             attempts.append(EvalAttempt(
                 passed=tracker.status is EvalStatus.PASSED,

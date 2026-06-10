@@ -38,36 +38,47 @@ def trade_stats(trades: list[TradeRecord]) -> str:
     return "\n".join(lines)
 
 
-def eval_report(attempts: list[EvalAttempt], base_contracts: int) -> str:
+def eval_report(attempts: list[EvalAttempt], risk_frac: float, max_rows: int = 40) -> str:
     if not attempts:
         return "No eval attempt completed within the data window."
     n_pass = sum(a.passed for a in attempts)
+    pass_days = [a.trading_days for a in attempts if a.passed]
     lines = [
-        f"Sequential eval replay @ {base_contracts} contracts: "
+        f"Sequential eval replay @ {100 * risk_frac:.0f}% of DD risked per trade: "
         f"{len(attempts)} attempts, {n_pass} passed ({100 * n_pass / len(attempts):.0f}%)"
     ]
-    for a in attempts:
+    if pass_days:
+        lines.append(f"  median trading days per pass: {np.median(pass_days):.0f}")
+    shown = attempts if len(attempts) <= max_rows else attempts[:max_rows]
+    for a in shown:
         lines.append(
             f"  {'PASS' if a.passed else 'BUST'}  {a.start_day} -> {a.end_day}  "
             f"days={a.trading_days:<3} trades={a.n_trades:<4} final=${a.final_balance:,.0f}"
         )
+    if len(attempts) > max_rows:
+        lines.append(f"  ... {len(attempts) - max_rows} more attempts not shown")
     return "\n".join(lines)
 
 
 def montecarlo_table(results: list[MonteCarloResult], horizon_days: int) -> str:
     lines = [
-        f"Monte Carlo (10k bootstrapped {horizon_days}-trading-day months):",
-        f"  {'size':>4} {'P(pass)':>8} {'P(bust)':>8} {'med days':>9} {'E[attempts]':>12} {'E[cost]':>9}",
+        f"Monte Carlo (bootstrapped {horizon_days}-trading-day months; "
+        "size in micros, 10 micros = 1 mini):",
+        f"  {'risk/trade':>10} {'avg size':>9} {'P(pass)':>8} {'P(bust)':>8} "
+        f"{'med days':>9} {'E[attempts]':>12} {'E[cost]':>9}",
     ]
     for r in results:
         att = f"{r.expected_attempts:.1f}" if r.expected_attempts else "inf"
         cost = f"${r.expected_cost:,.0f}" if r.expected_cost else "-"
         days = f"{r.median_days_to_pass:.0f}" if r.median_days_to_pass else "-"
-        lines.append(f"  {r.contracts:>4} {100 * r.p_pass:>7.1f}% {100 * r.p_bust:>7.1f}% "
+        lines.append(f"  {100 * r.risk_frac:>8.0f}%  {r.avg_micros:>8.1f} "
+                     f"{100 * r.p_pass:>7.1f}% {100 * r.p_bust:>7.1f}% "
                      f"{days:>9} {att:>12} {cost:>9}")
-    best = max(results, key=lambda r: r.p_pass)
-    lines.append(f"  -> best size: {best.contracts} contracts "
-                 f"(P(pass)={100 * best.p_pass:.1f}%, expected cost ${best.expected_cost:,.0f})")
+    best = max(results, key=lambda r: (round(r.p_pass, 3),
+                                       -(r.median_days_to_pass or horizon_days)))
+    cost = f"${best.expected_cost:,.0f}" if best.expected_cost else "n/a"
+    lines.append(f"  -> best: risk {100 * best.risk_frac:.0f}% of DD per trade "
+                 f"(P(pass)={100 * best.p_pass:.1f}%, expected cost {cost})")
     return "\n".join(lines)
 
 

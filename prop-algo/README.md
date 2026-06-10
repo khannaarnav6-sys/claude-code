@@ -43,6 +43,17 @@ some evals is a priced-in part of the strategy, not a surprise.
   Tradovate yourself.** Apex prohibits fully automated trading; this design
   keeps you compliant.
 
+## Sizing model
+
+Fixed-contract sizing does not survive contact with this account: index
+futures stops are ATR-scale ($2,000-6,000 per mini) against a $2,500 trailing
+drawdown, so a fixed 4-mini position busts almost every attempt (verified:
+900 attempts, 2 passes). Instead, every trade risks a **fraction of the
+trailing drawdown**, converted into position size through the signal's stop
+distance, in **micro granularity** (Apex 50K allows 10 minis = 100 micros).
+Tight stops get big size, wide stops get small size, and the `montecarlo`
+sweep finds the risk fraction that maximizes P(pass).
+
 ## Quick start
 
 ```bash
@@ -52,9 +63,9 @@ pip install -r requirements.txt
 python scripts/cli.py fetch --symbols NQ ES --start 2023-01-01
 
 # 2. trade stats + sequential eval replay over the full history
-python scripts/cli.py backtest --symbols NQ ES --start 2023-01-01 --contracts 4
+python scripts/cli.py backtest --symbols NQ ES --start 2023-01-01 --risk 0.20
 
-# 3. the headline numbers: P(pass), median days, expected attempts/cost per size
+# 3. the headline numbers: P(pass), attempts, cost across risk levels
 python scripts/cli.py montecarlo --symbols NQ ES --start 2023-01-01
 
 # promo accounts often waive the 7-day minimum:
@@ -65,23 +76,35 @@ python scripts/cli.py parity --symbols NQ ES
 
 # 5. go online (signal alerts via Discord webhook)
 export DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
-python scripts/cli.py live --contracts 4          # or --dry-run / --once
+python scripts/cli.py live --risk 0.20            # or --dry-run / --once
 ```
 
 Docker: `docker build -t propalgo . && docker run -e DISCORD_WEBHOOK_URL=... propalgo`
 
-## How to read the Monte Carlo output
+## Results (NQ+ES 15m, Jan 2023 - Jun 2026, 1,026 trades)
+
+Strategy edge per 1 mini contract: momentum PF 1.35 (n=155), ORB PF 1.02
+(n=871), combined +$46k total but with a losing 2025 (-$30k) — regime risk
+is real and the eval numbers below include it.
 
 ```
-size  P(pass)  P(bust)  med days  E[attempts]  E[cost]
-   4    62.0%    35.1%         9          1.6      $56
+Monte Carlo (bootstrapped 30-trading-day months; size in micros):
+  risk/trade  avg size  P(pass)  P(bust)  med days  E[attempts]   E[cost]
+        10%       2.3     5.4%    12.4%        24         18.7      $653
+        15%       3.3    22.4%    48.9%        18          4.5      $156
+        20%       4.3    29.2%    66.7%        12          3.4      $120
+        25%       5.4    28.7%    71.2%         9          3.5      $122
+        30%       6.3    26.1%    73.9%         7          3.8      $134
+        50%       8.8    19.8%    80.2%         7          5.1      $177
+  -> best: risk 20% of DD per trade (P(pass)=29.2%, expected cost $120)
 ```
 
-means: at 4 contracts, ~62% of 30-trading-day eval months pass, the median
-pass takes 9 trading days, and you should budget ~1.6 attempts (~$56 in fees
-at $35/attempt) per funded account. Bigger size passes faster but busts more;
-the sweep shows you the whole tradeoff instead of pretending there's a free
-lunch.
+Read it honestly: this is a gambler's-ruin curve, and 20% risk per trade is
+its peak — ~29% of eval months pass, so budget **~3-4 attempts (~$120 in
+promo fees) per funded account**. Risking more passes faster but busts more;
+risking less starves the target. The sequential replay over the same history
+(attempts not capped at 30 days) passed 11 of 29 back-to-back evals (38%).
+Proxy-vs-futures signal parity over the recent overlap window: **91%**.
 
 ## Honest caveats
 

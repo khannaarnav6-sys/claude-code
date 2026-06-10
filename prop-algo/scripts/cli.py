@@ -67,10 +67,10 @@ def cmd_backtest(args, cfg):
     print()
     print(trade_stats(trades))
     print()
-    contracts = args.contracts or int(cfg.sizing.get("base_contracts", 4))
-    attempts = run_eval_sequence(trades, cfg.account, contracts,
+    risk = args.risk if args.risk is not None else float(cfg.sizing.get("risk_frac", 0.15))
+    attempts = run_eval_sequence(trades, cfg.account, risk,
                                  float(cfg.sizing.get("aplus_multiplier", 1.5)))
-    print(eval_report(attempts, contracts))
+    print(eval_report(attempts, risk))
     if args.export:
         trades_frame(trades).to_csv(args.export, index=False)
         print(f"\nTrade log written to {args.export}")
@@ -78,13 +78,13 @@ def cmd_backtest(args, cfg):
 
 def cmd_montecarlo(args, cfg):
     from propalgo.backtest.report import montecarlo_table
-    from propalgo.sizing import recommend_contracts
+    from propalgo.sizing import recommend_risk
     if args.min_days is not None:
         from dataclasses import replace
         cfg.account = replace(cfg.account, min_trading_days=args.min_days)
     trades = _generate(cfg, args)
     print(f"\n{len(trades)} historical trades feed the bootstrap.\n")
-    best, results = recommend_contracts(
+    best, results = recommend_risk(
         trades, cfg.account,
         float(cfg.sizing.get("aplus_multiplier", 1.5)),
         horizon_days=args.horizon, n_sims=args.sims)
@@ -117,12 +117,12 @@ def cmd_parity(args, cfg):
 
 def cmd_live(args, cfg):
     from propalgo.live.runner import run_cycle, run_forever
-    contracts = args.contracts or int(cfg.sizing.get("base_contracts", 4))
+    risk = args.risk if args.risk is not None else float(cfg.sizing.get("risk_frac", 0.15))
     if args.once:
-        n = run_cycle(cfg, contracts, dry_run=args.dry_run)
+        n = run_cycle(cfg, risk, dry_run=args.dry_run)
         print(f"cycle complete, {n} new alert(s)")
     else:
-        run_forever(cfg, contracts, dry_run=args.dry_run)
+        run_forever(cfg, risk, dry_run=args.dry_run)
 
 
 def main():
@@ -138,7 +138,8 @@ def main():
     sub.add_parser("fetch", parents=[common], help="download + cache bars")
 
     bt = sub.add_parser("backtest", parents=[common], help="trade stats + sequential eval replay")
-    bt.add_argument("--contracts", type=int, default=None)
+    bt.add_argument("--risk", type=float, default=None,
+                    help="per-trade risk as fraction of trailing DD (e.g. 0.15)")
     bt.add_argument("--min-days", type=int, default=None, help="override min trading days (promo=1)")
     bt.add_argument("--export", default=None, help="CSV path for the trade log")
 
@@ -150,7 +151,8 @@ def main():
     sub.add_parser("parity", parents=[common], help="proxy vs futures signal agreement")
 
     lv = sub.add_parser("live", help="online 15m signal loop -> Discord alerts")
-    lv.add_argument("--contracts", type=int, default=None)
+    lv.add_argument("--risk", type=float, default=None,
+                    help="per-trade risk as fraction of trailing DD (e.g. 0.15)")
     lv.add_argument("--dry-run", action="store_true")
     lv.add_argument("--once", action="store_true", help="run one cycle and exit")
 

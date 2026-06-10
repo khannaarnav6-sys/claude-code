@@ -8,10 +8,13 @@ import requests
 from ..strategies.base import Signal
 
 
-def format_signal(sig: Signal, contracts: int) -> str:
+def format_signal(sig: Signal, micros: int) -> str:
     side = "LONG" if sig.side > 0 else "SHORT"
+    minis, rem = divmod(micros, 10)
+    size = f"{micros} micros" if minis == 0 else (
+        f"{minis} minis" if rem == 0 else f"{minis} minis + {rem} micros")
     return (
-        f"**{side} {sig.symbol} x{contracts}**  [{sig.strategy} / {sig.grade}]\n"
+        f"**{side} {sig.symbol} x {size}**  [{sig.strategy} / {sig.grade}]\n"
         f"entry ~ `{sig.entry_ref:.2f}`  stop `{sig.stop:.2f}`  target `{sig.target:.2f}`\n"
         f"{sig.note}\n"
         f"_Manual execution only — place the order yourself in Tradovate._"
