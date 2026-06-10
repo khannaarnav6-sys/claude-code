@@ -16,6 +16,17 @@ def _parse_date(s: str) -> datetime:
     return datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=timezone.utc)
 
 
+def _resolve_risk(args, cfg) -> float:
+    """--risk wins; then --profile; then the config's default profile."""
+    if getattr(args, "risk", None) is not None:
+        return args.risk
+    profiles = cfg.sizing.get("profiles", {})
+    name = getattr(args, "profile", None) or cfg.sizing.get("profile", "grind")
+    if name in profiles:
+        return float(profiles[name])
+    return float(cfg.sizing.get("risk_frac", 0.085))
+
+
 def _load_backtest_bars(cfg, symbols, start, end):
     from propalgo.data.dukascopy import DukascopySource
     src = DukascopySource(cfg.instruments)
@@ -67,7 +78,7 @@ def cmd_backtest(args, cfg):
     print()
     print(trade_stats(trades))
     print()
-    risk = args.risk if args.risk is not None else float(cfg.sizing.get("risk_frac", 0.15))
+    risk = _resolve_risk(args, cfg)
     attempts = run_eval_sequence(trades, cfg.account, risk,
                                  float(cfg.sizing.get("aplus_multiplier", 1.5)))
     print(eval_report(attempts, risk))
@@ -117,7 +128,7 @@ def cmd_parity(args, cfg):
 
 def cmd_live(args, cfg):
     from propalgo.live.runner import run_cycle, run_forever
-    risk = args.risk if args.risk is not None else float(cfg.sizing.get("risk_frac", 0.15))
+    risk = _resolve_risk(args, cfg)
     if args.once:
         n = run_cycle(cfg, risk, dry_run=args.dry_run)
         print(f"cycle complete, {n} new alert(s)")
@@ -139,12 +150,16 @@ def main():
 
     bt = sub.add_parser("backtest", parents=[common], help="trade stats + sequential eval replay")
     bt.add_argument("--risk", type=float, default=None,
-                    help="per-trade risk as fraction of trailing DD (e.g. 0.15)")
+                    help="per-trade risk as fraction of trailing DD (e.g. 0.085)")
+    bt.add_argument("--profile", choices=["sprint", "balanced", "grind"], default=None,
+                    help="named risk profile from config.yaml (default: config's choice)")
     bt.add_argument("--min-days", type=int, default=None, help="override min trading days (promo=1)")
     bt.add_argument("--export", default=None, help="CSV path for the trade log")
 
-    mc = sub.add_parser("montecarlo", parents=[common], help="P(pass) sweep across sizes 1-10")
-    mc.add_argument("--horizon", type=int, default=30, help="trading days per attempt")
+    mc = sub.add_parser("montecarlo", parents=[common], help="P(pass)/attempts sweep across risk levels")
+    mc.add_argument("--horizon", type=int, default=250,
+                    help="max trading days per attempt (evals have no time limit; "
+                         "fees accrue monthly)")
     mc.add_argument("--sims", type=int, default=10_000)
     mc.add_argument("--min-days", type=int, default=None)
 
@@ -152,7 +167,9 @@ def main():
 
     lv = sub.add_parser("live", help="online 15m signal loop -> Discord alerts")
     lv.add_argument("--risk", type=float, default=None,
-                    help="per-trade risk as fraction of trailing DD (e.g. 0.15)")
+                    help="per-trade risk as fraction of trailing DD (e.g. 0.085)")
+    lv.add_argument("--profile", choices=["sprint", "balanced", "grind"], default=None,
+                    help="named risk profile from config.yaml (default: config's choice)")
     lv.add_argument("--dry-run", action="store_true")
     lv.add_argument("--once", action="store_true", help="run one cycle and exit")
 

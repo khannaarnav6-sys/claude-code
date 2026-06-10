@@ -39,6 +39,9 @@ class OpeningRangeBreakout(Strategy):
             return []
 
         avg_vol = session["volume"].rolling(20, min_periods=3).mean()
+        max_entries = int(self.params.get("max_entries", 1))
+        signals: list[tuple[int, Signal]] = []
+        armed = True  # re-arm only after a close back inside the range
         # leave one bar after the signal for the entry fill
         for i in range(or_bars, len(session) - 1):
             close = session["close"].iloc[i]
@@ -47,17 +50,25 @@ class OpeningRangeBreakout(Strategy):
                 side = 1
             elif close < or_low:
                 side = -1
-            if side == 0 or (side < 0 and shorts == "skip"):
+            if side == 0:
+                armed = True
                 continue
+            if not armed or (side < 0 and shorts == "skip"):
+                continue
+            armed = False
             stop_dist = min(or_range, daily_atr) if daily_atr > 0 else or_range
             stop = close - side * stop_dist
             target = close + side * target_r * stop_dist
             vol_ok = avg_vol.iloc[i] > 0 and session["volume"].iloc[i] >= min_vol_ratio * avg_vol.iloc[i]
-            return [(i, Signal(
+            nth = len(signals) + 1
+            signals.append((i, Signal(
                 strategy=self.name, symbol=symbol, side=side,
                 entry_ref=close, stop=stop, target=target,
                 grade="A+" if vol_ok else "A",
-                note=f"OR {or_low:.2f}-{or_high:.2f} break {'up' if side > 0 else 'down'}",
+                note=f"OR {or_low:.2f}-{or_high:.2f} break {'up' if side > 0 else 'down'}"
+                     + (f" (re-entry #{nth})" if nth > 1 else ""),
                 action="veto" if (side < 0 and shorts == "veto") else "trade",
-            ))]
-        return []
+            )))
+            if len(signals) >= max_entries:
+                break
+        return signals

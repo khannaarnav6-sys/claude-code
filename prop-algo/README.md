@@ -65,9 +65,9 @@ pip install -r requirements.txt
 python scripts/cli.py fetch --symbols NQ ES --start 2023-01-01
 
 # 2. trade stats + sequential eval replay over the full history
-python scripts/cli.py backtest --symbols NQ ES --start 2023-01-01 --risk 0.20
+python scripts/cli.py backtest --symbols NQ ES --start 2023-01-01 --profile grind
 
-# 3. the headline numbers: P(pass), attempts, cost across risk levels
+# 3. the headline numbers: P(pass), E[attempts], months, cost per risk level
 python scripts/cli.py montecarlo --symbols NQ ES --start 2023-01-01
 
 # promo accounts often waive the 7-day minimum:
@@ -78,32 +78,37 @@ python scripts/cli.py parity --symbols NQ ES
 
 # 5. go online (signal alerts via Discord webhook)
 export DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
-python scripts/cli.py live --risk 0.20            # or --dry-run / --once
+python scripts/cli.py live --profile grind        # or --dry-run / --once
 ```
 
 Docker: `docker build -t propalgo . && docker run -e DISCORD_WEBHOOK_URL=... propalgo`
 
 ## Results (NQ+ES 15m, Jan 2023 - Jun 2026, 557 trades)
 
-After the optimization pass below: **P(pass) 36.9% per 30-trading-day month
-at 25% risk, expected cost ~$95 (≈2.7 attempts) per funded account** — up
-from the 29.2% / $120 baseline.
+**Attempts and speed trade off directly** — Apex evals have no time limit
+(fees accrue monthly), so risking less per trade busts less but grinds
+longer. Pick a profile (`--profile`, default `grind`):
 
 ```
-Monte Carlo (bootstrapped 30-trading-day months; size in micros):
-  risk/trade  avg size  P(pass)  P(bust)  med days  E[attempts]   E[cost]
-        10%       2.1     3.5%     3.2%        25         28.3      $992
-        15%       3.0    21.5%    26.5%        21          4.7      $163
-        20%       3.9    33.2%    51.2%        17          3.0      $105
-        25%       4.8    36.9%    59.3%        14          2.7       $95
-        30%       5.6    35.0%    63.0%        12          2.9      $100
-        50%       7.5    26.7%    71.1%        15          3.7      $131
-  -> best: risk 25% of DD per trade (P(pass)=36.9%, expected cost $95)
+Monte Carlo (attempts capped at 250 trading days, fees accrue monthly):
+  profile    risk/trade  P(pass)  P(bust)  med days  mo/att  E[attempts]  E[cost]
+  grind            8.5%    77.2%    19.2%        98    5.77         1.30     $262
+  balanced        12.0%    62.0%    38.0%        54    3.22         1.61     $182
+  sprint          25.0%    40.3%    59.7%        14    1.14         2.48      $99
 ```
 
-The sequential replay over the same history (attempts not capped at 30 days)
-passed 14 of 37 back-to-back evals (38%, median 11 trading days per pass).
-Proxy-vs-futures signal parity over the recent overlap window: **91%**.
+- **grind (default): ~1.3 attempts on average** — three out of four evals
+  pass, but a pass takes ~5 months of trading and ~$260 in monthly fees.
+- **sprint: ~2.5 attempts**, median pass in ~3 weeks, cheapest in fees —
+  you just eat more blown evals along the way.
+- There is no setting that passes fast AND rarely busts; that point sits
+  outside what this edge (PF 1.14) can buy. Anyone promising both is selling
+  something.
+
+The sequential replay over the actual 2023-2026 sequence at grind risk went
+**3 for 3** (median 80 trading days per pass, surviving 2025); at sprint
+risk it passed 14 of 37 (38%, median 11 days). Proxy-vs-futures signal
+parity over the recent overlap window: **91%**.
 
 **What moved the needle (kept):**
 - **ORB short veto** (+4.5pp): breakdown trades lose money on long-biased
@@ -123,11 +128,15 @@ time stops (-9pp), adaptive timid/bold sizing (-3 to -6pp), one-loss-per-day
 (-1 to -2pp), adding YM/RTY (neutral — one position at a time means they just
 compete for the same slot).
 
-**Regime honesty** (chosen config, per-period P(pass) at 20-25% risk):
-2023: 47.5% · 2024: 38.5% · 2025: **13.6%** · 2026 ytd: 42.4%. In a chop
-year like 2025 the expected cost per pass rises to ~$260 (~7 attempts). The
-edge is regime-dependent; the headline 36.9% averages over good and bad
-regimes.
+**Also tried for the attempts goal and rejected:** a midday range-breakout
+strategy to raise trade frequency (PF 0.65, loses money every full year) and
+ORB re-entries after stop-outs (slightly positive alone, but neutral-to-worse
+through the eval math — extra trades add bust risk faster than progress).
+
+**Regime honesty** (grind profile, per-year E[attempts]): 2023: 1.12 ·
+2024: 1.60 · 2025: **5.46** · 2026 ytd: 1.20. The 1.3 average holds across
+mixed regimes, but a pure chop year like 2025 alone is ~5 attempts even at
+grind risk. The edge is regime-dependent; no sizing setting fixes that.
 
 ## Honest caveats
 

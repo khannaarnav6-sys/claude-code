@@ -201,6 +201,28 @@ def run_oos(cfg, bars):
         mc_line(label, sub, cfg, fracs=(0.20, 0.25), policy={"taper": True})
 
 
+def run_horizon(cfg, bars, trades=None):
+    """Attempts-vs-time tradeoff: uncapped attempts at lower risk bust less.
+    Find the cheapest config with E[attempts] <= 1.5."""
+    if trades is None:
+        b = {s: v for s, v in bars.items() if s in ("NQ", "ES")}
+        trades = generate_trades(b, build_strategies(cfg.strategies),
+                                 cfg.instruments, cfg.costs)
+    print(f"\n=== HORIZON GRID ({len(trades)} trades, {SIMS} sims/cell, taper on) ===")
+    print(f"  {'risk':>5} {'horizon':>8} {'P(pass)':>8} {'P(bust)':>8} "
+          f"{'med days':>9} {'E[att]':>7} {'mo/att':>7} {'E[cost]':>8}")
+    for f in (0.08, 0.10, 0.12, 0.15, 0.20, 0.25):
+        for h in (30, 60, 90, 130):
+            r = run_montecarlo(trades, cfg.account, f, horizon_days=h,
+                               n_sims=SIMS, policy={"taper": True})
+            att = f"{r.expected_attempts:.2f}" if r.expected_attempts else "inf"
+            cost = f"${r.expected_cost:,.0f}" if r.expected_cost else "-"
+            days = f"{r.median_days_to_pass:.0f}" if r.median_days_to_pass else "-"
+            flag = " <==" if r.expected_attempts and r.expected_attempts <= 1.5 else ""
+            print(f"  {f:>5.0%} {h:>8} {100 * r.p_pass:>7.1f}% {100 * r.p_bust:>7.1f}% "
+                  f"{days:>9} {att:>7} {r.avg_months:>7.2f} {cost:>8}{flag}")
+
+
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "all"
     cfg = load_config()
@@ -216,6 +238,8 @@ def main():
         run_stack(cfg, bars)
     if mode in ("oos", "all"):
         run_oos(cfg, bars)
+    if mode in ("horizon", "all"):
+        run_horizon(cfg, bars)
     if mode in ("diag", "slices", "all", "core"):
         trades = generate_trades(bars, build_strategies(cfg.strategies),
                                  cfg.instruments, cfg.costs)

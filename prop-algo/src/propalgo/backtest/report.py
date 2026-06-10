@@ -62,23 +62,25 @@ def eval_report(attempts: list[EvalAttempt], risk_frac: float, max_rows: int = 4
 
 def montecarlo_table(results: list[MonteCarloResult], horizon_days: int) -> str:
     lines = [
-        f"Monte Carlo (bootstrapped {horizon_days}-trading-day months; "
-        "size in micros, 10 micros = 1 mini):",
+        f"Monte Carlo (attempts capped at {horizon_days} trading days, fees accrue "
+        "monthly; size in micros, 10 micros = 1 mini):",
         f"  {'risk/trade':>10} {'avg size':>9} {'P(pass)':>8} {'P(bust)':>8} "
-        f"{'med days':>9} {'E[attempts]':>12} {'E[cost]':>9}",
+        f"{'med days':>9} {'mo/att':>7} {'E[attempts]':>12} {'E[cost]':>9}",
     ]
     for r in results:
-        att = f"{r.expected_attempts:.1f}" if r.expected_attempts else "inf"
+        att = f"{r.expected_attempts:.2f}" if r.expected_attempts else "inf"
         cost = f"${r.expected_cost:,.0f}" if r.expected_cost else "-"
         days = f"{r.median_days_to_pass:.0f}" if r.median_days_to_pass else "-"
-        lines.append(f"  {100 * r.risk_frac:>8.0f}%  {r.avg_micros:>8.1f} "
+        lines.append(f"  {100 * r.risk_frac:>9.1f}% {r.avg_micros:>8.1f} "
                      f"{100 * r.p_pass:>7.1f}% {100 * r.p_bust:>7.1f}% "
-                     f"{days:>9} {att:>12} {cost:>9}")
+                     f"{days:>9} {r.avg_months:>7.2f} {att:>12} {cost:>9}")
     best = max(results, key=lambda r: (round(r.p_pass, 3),
                                        -(r.median_days_to_pass or horizon_days)))
     cost = f"${best.expected_cost:,.0f}" if best.expected_cost else "n/a"
-    lines.append(f"  -> best: risk {100 * best.risk_frac:.0f}% of DD per trade "
-                 f"(P(pass)={100 * best.p_pass:.1f}%, expected cost {cost})")
+    att = f"{best.expected_attempts:.2f}" if best.expected_attempts else "inf"
+    lines.append(f"  -> fewest attempts: risk {100 * best.risk_frac:.1f}% of DD per trade "
+                 f"(P(pass)={100 * best.p_pass:.1f}%, E[attempts]={att}, "
+                 f"expected cost {cost})")
     return "\n".join(lines)
 
 

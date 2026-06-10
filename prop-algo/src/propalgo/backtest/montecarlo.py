@@ -17,7 +17,7 @@ from ..config import AccountRules
 from ..rules.apex import EvalStatus, EvalTracker
 from .engine import TradeRecord, size_micros
 
-RISK_FRACS = [0.05, 0.08, 0.10, 0.12, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50]
+RISK_FRACS = [0.05, 0.08, 0.085, 0.09, 0.10, 0.12, 0.15, 0.20, 0.25, 0.30, 0.50]
 
 
 @dataclass
@@ -27,9 +27,12 @@ class MonteCarloResult:
     p_bust: float
     median_days_to_pass: float | None
     expected_attempts: float | None   # geometric: 1 / p_pass
-    expected_cost: float | None       # attempts * eval fee
+    expected_cost: float | None       # fee x expected total months until a pass
     avg_final_balance: float
     avg_micros: float             # average position size actually used
+    avg_months: float = 1.0       # billing months consumed per attempt (21 td/mo)
+
+TRADING_DAYS_PER_MONTH = 21
 
 
 def _trades_by_day(trades: list[TradeRecord]) -> list[list[TradeRecord]]:
@@ -108,27 +111,31 @@ def run_montecarlo(trades: list[TradeRecord], rules: AccountRules, risk_frac: fl
     if not day_pool:
         raise ValueError("no trades to bootstrap from")
     rng = np.random.default_rng(seed)
-    passes, busts, days_to_pass, finals, sizes = 0, 0, [], [], []
+    passes, busts, days_to_pass, finals, sizes, months = 0, 0, [], [], [], []
     for _ in range(n_sims):
         status, days, bal = simulate_attempt(day_pool, rules, risk_frac,
                                              aplus_multiplier, horizon_days, rng,
                                              sizes, policy)
         finals.append(bal)
+        months.append(max(1, int(np.ceil(days / TRADING_DAYS_PER_MONTH))))
         if status is EvalStatus.PASSED:
             passes += 1
             days_to_pass.append(days)
         elif status is EvalStatus.BUSTED:
             busts += 1
     p_pass = passes / n_sims
+    avg_months = float(np.mean(months))
     return MonteCarloResult(
         risk_frac=risk_frac,
         p_pass=p_pass,
         p_bust=busts / n_sims,
         median_days_to_pass=float(np.median(days_to_pass)) if days_to_pass else None,
         expected_attempts=(1.0 / p_pass) if p_pass > 0 else None,
-        expected_cost=(rules.eval_fee / p_pass) if p_pass > 0 else None,
+        # total billing months across however many attempts a pass takes
+        expected_cost=(rules.eval_fee * avg_months / p_pass) if p_pass > 0 else None,
         avg_final_balance=float(np.mean(finals)),
         avg_micros=float(np.mean(sizes)) if sizes else 0.0,
+        avg_months=avg_months,
     )
 
 

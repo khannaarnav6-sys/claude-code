@@ -54,9 +54,16 @@ strategies:
     target_r: 2.5
 
 sizing:
-  risk_frac: 0.25              # per-trade risk as fraction of trailing DD;
-                               # 0.25 maximized P(pass) in the 2023-2026 sweep
-                               # with taper on -- re-tune with `montecarlo`
+  # Attempts and speed trade off directly: risking less busts less but takes
+  # months. Numbers from the 2023-2026 Monte Carlo (uncapped attempts):
+  #   sprint   25.0% risk -> E[attempts] 2.7, median pass ~14 td, ~$105 fees
+  #   balanced 12.0% risk -> E[attempts] 1.6, median pass ~53 td, ~$182 fees
+  #   grind     8.5% risk -> E[attempts] 1.3, median pass ~98 td, ~$262 fees
+  profiles:
+    sprint: 0.25
+    balanced: 0.12
+    grind: 0.085
+  profile: grind               # default; override per-run with --profile/--risk
   aplus_multiplier: 1.5        # A+ signals risk 1.5x the budget
   taper: true                  # near the target, risk only what's left to gain
 
