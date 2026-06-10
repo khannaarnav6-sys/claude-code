@@ -42,17 +42,42 @@ def _trades_by_day(trades: list[TradeRecord]) -> list[list[TradeRecord]]:
 def simulate_attempt(day_pool: list[list[TradeRecord]], rules: AccountRules,
                      risk_frac: float, aplus_multiplier: float,
                      horizon_days: int, rng: np.random.Generator,
-                     sizes_out: list | None = None) -> tuple[EvalStatus, int, float]:
-    """One synthetic eval attempt; returns (status, trading_days_used, balance)."""
+                     sizes_out: list | None = None,
+                     policy: dict | None = None) -> tuple[EvalStatus, int, float]:
+    """One synthetic eval attempt; returns (status, trading_days_used, balance).
+
+    `policy` options:
+      stop_after_loss: skip the rest of a day's signals after a losing trade.
+      adaptive: 'timid' scales the risk budget with the remaining buffer above
+        the trailing threshold (risk less when wounded); 'bold' scales it with
+        distance left to the target (risk more when behind).
+    """
+    policy = policy or {}
+    stop_after_loss = bool(policy.get("stop_after_loss"))
+    adaptive = policy.get("adaptive")
+    taper = bool(policy.get("taper"))
     tracker = EvalTracker(rules)
     days_used = 0
     for _ in range(horizon_days):
         day = day_pool[rng.integers(len(day_pool))]
         days_used += 1
+        day_lost = False
         for tr in day:
+            if day_lost:
+                continue
             budget = risk_frac * rules.trailing_drawdown
+            if adaptive == "timid":
+                budget = risk_frac * max(0.0, tracker.balance - tracker.threshold)
+            elif adaptive == "bold":
+                remaining = max(0.0, tracker.target_balance - tracker.balance)
+                budget = risk_frac * rules.trailing_drawdown * \
+                    max(0.5, remaining / rules.profit_target)
             if tr.grade == "A+":
                 budget *= aplus_multiplier
+            if taper:
+                # never risk much more than what's left to the target
+                remaining = max(0.0, tracker.target_balance - tracker.balance)
+                budget = min(budget, max(remaining, 0.04 * rules.trailing_drawdown))
             micros = size_micros(budget, tr.risk_per_contract, rules.max_contracts)
             if tracker.target_pending():
                 micros = min(micros, 1)
@@ -68,6 +93,8 @@ def simulate_attempt(day_pool: list[list[TradeRecord]], rules: AccountRules,
                     break
             if tracker.status is EvalStatus.ACTIVE:
                 tracker.on_trade_closed(scale * tr.pnl_per_contract)
+                if stop_after_loss and tr.pnl_per_contract < 0:
+                    day_lost = True
             if tracker.status is not EvalStatus.ACTIVE:
                 return tracker.status, days_used, tracker.balance
     return tracker.status, days_used, tracker.balance
@@ -75,7 +102,8 @@ def simulate_attempt(day_pool: list[list[TradeRecord]], rules: AccountRules,
 
 def run_montecarlo(trades: list[TradeRecord], rules: AccountRules, risk_frac: float,
                    aplus_multiplier: float = 1.5, horizon_days: int = 30,
-                   n_sims: int = 10_000, seed: int = 7) -> MonteCarloResult:
+                   n_sims: int = 10_000, seed: int = 7,
+                   policy: dict | None = None) -> MonteCarloResult:
     day_pool = _trades_by_day(trades)
     if not day_pool:
         raise ValueError("no trades to bootstrap from")
@@ -83,7 +111,8 @@ def run_montecarlo(trades: list[TradeRecord], rules: AccountRules, risk_frac: fl
     passes, busts, days_to_pass, finals, sizes = 0, 0, [], [], []
     for _ in range(n_sims):
         status, days, bal = simulate_attempt(day_pool, rules, risk_frac,
-                                             aplus_multiplier, horizon_days, rng, sizes)
+                                             aplus_multiplier, horizon_days, rng,
+                                             sizes, policy)
         finals.append(bal)
         if status is EvalStatus.PASSED:
             passes += 1
@@ -106,6 +135,10 @@ def run_montecarlo(trades: list[TradeRecord], rules: AccountRules, risk_frac: fl
 def sweep_risk(trades: list[TradeRecord], rules: AccountRules,
                aplus_multiplier: float = 1.5, horizon_days: int = 30,
                n_sims: int = 10_000,
-               fracs: list[float] | None = None) -> list[MonteCarloResult]:
-    return [run_montecarlo(trades, rules, f, aplus_multiplier, horizon_days, n_sims)
+               fracs: list[float] | None = None,
+               policy: dict | None = None) -> list[MonteCarloResult]:
+    if policy is None:
+        policy = {"taper": True}
+    return [run_montecarlo(trades, rules, f, aplus_multiplier, horizon_days,
+                           n_sims, policy=policy)
             for f in (fracs or RISK_FRACS)]

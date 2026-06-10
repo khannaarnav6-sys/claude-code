@@ -113,6 +113,37 @@ def test_size_micros_granularity():
     assert size_micros(375.0, 0.0, max_contracts=10) == 0     # degenerate
 
 
+def test_veto_signal_blocks_window_but_is_not_traded():
+    from propalgo.backtest.engine import generate_trades
+    from propalgo.strategies.base import Strategy
+
+    class Fake(Strategy):
+        def __init__(self, name, emissions):
+            super().__init__({})
+            self.name, self.emissions = name, emissions
+
+        def on_session(self, symbol, session, daily_atr):
+            return self.emissions
+
+    # one RTH session of flat bars (26 bars from 9:30 ET)
+    idx = pd.date_range("2026-01-05 14:30", periods=26, freq="15min", tz="UTC")
+    bars = pd.DataFrame({"open": 100.0, "high": 100.5, "low": 99.5,
+                         "close": 100.0, "volume": 1.0}, index=idx)
+    veto = Signal(strategy="v", symbol="NQ", side=-1, entry_ref=100,
+                  stop=110, target=90, action="veto")        # never exits -> blocks to EOD
+    late = Signal(strategy="w", symbol="NQ", side=1, entry_ref=100,
+                  stop=90, target=110)
+    trades = generate_trades({"NQ": bars},
+                             [Fake("v", [(2, veto)]), Fake("w", [(5, late)])],
+                             {"NQ": NQ}, NO_COSTS)
+    assert trades == []  # veto not traded, and it blocked the later signal
+
+    # without the veto, the later signal trades normally
+    trades = generate_trades({"NQ": bars}, [Fake("w", [(5, late)])],
+                             {"NQ": NQ}, NO_COSTS)
+    assert len(trades) == 1 and trades[0].strategy == "w"
+
+
 def test_eval_sequence_pass_and_bust():
     rules = AccountRules(min_trading_days=1)
     # risk 50% of DD = $1,250 budget; $200/mini risk -> 62 micros -> 6.2 minis

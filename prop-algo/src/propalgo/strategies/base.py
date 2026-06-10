@@ -22,6 +22,8 @@ class Signal:
     target: float
     grade: str = "A"        # "A+" sized up by sizing.aplus_multiplier
     note: str = ""
+    action: str = "trade"   # "veto": don't trade it, but block new entries
+                            # until this phantom position would have exited
 
     @property
     def risk_points(self) -> float:

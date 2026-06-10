@@ -28,8 +28,10 @@ some evals is a priced-in part of the strategy, not a surprise.
 - **Strategies** (`src/propalgo/strategies/`) — high-conviction, one signal per
   session each:
   - `orb.py` — 30-minute opening range breakout, ATR-capped stop, 2R target.
-  - `momentum.py` — overnight gap holding one side of VWAP → trend-day
-    continuation.
+    Longs only; breakdowns aren't traded but *veto* other entries while the
+    phantom short would be open (see Results).
+  - `momentum.py` — overnight gap (≥0.5 ATR) holding one side of VWAP →
+    trend-day continuation.
   - Signals carry a grade (`A` / `A+`); A+ setups get sized up.
 - **Backtest** (`src/propalgo/backtest/`) — bar-by-bar engine with conservative
   fills (stop before target when both hit in one bar, 1-tick slippage/side,
@@ -81,30 +83,51 @@ python scripts/cli.py live --risk 0.20            # or --dry-run / --once
 
 Docker: `docker build -t propalgo . && docker run -e DISCORD_WEBHOOK_URL=... propalgo`
 
-## Results (NQ+ES 15m, Jan 2023 - Jun 2026, 1,026 trades)
+## Results (NQ+ES 15m, Jan 2023 - Jun 2026, 557 trades)
 
-Strategy edge per 1 mini contract: momentum PF 1.35 (n=155), ORB PF 1.02
-(n=871), combined +$46k total but with a losing 2025 (-$30k) — regime risk
-is real and the eval numbers below include it.
+After the optimization pass below: **P(pass) 36.9% per 30-trading-day month
+at 25% risk, expected cost ~$95 (≈2.7 attempts) per funded account** — up
+from the 29.2% / $120 baseline.
 
 ```
 Monte Carlo (bootstrapped 30-trading-day months; size in micros):
   risk/trade  avg size  P(pass)  P(bust)  med days  E[attempts]   E[cost]
-        10%       2.3     5.4%    12.4%        24         18.7      $653
-        15%       3.3    22.4%    48.9%        18          4.5      $156
-        20%       4.3    29.2%    66.7%        12          3.4      $120
-        25%       5.4    28.7%    71.2%         9          3.5      $122
-        30%       6.3    26.1%    73.9%         7          3.8      $134
-        50%       8.8    19.8%    80.2%         7          5.1      $177
-  -> best: risk 20% of DD per trade (P(pass)=29.2%, expected cost $120)
+        10%       2.1     3.5%     3.2%        25         28.3      $992
+        15%       3.0    21.5%    26.5%        21          4.7      $163
+        20%       3.9    33.2%    51.2%        17          3.0      $105
+        25%       4.8    36.9%    59.3%        14          2.7       $95
+        30%       5.6    35.0%    63.0%        12          2.9      $100
+        50%       7.5    26.7%    71.1%        15          3.7      $131
+  -> best: risk 25% of DD per trade (P(pass)=36.9%, expected cost $95)
 ```
 
-Read it honestly: this is a gambler's-ruin curve, and 20% risk per trade is
-its peak — ~29% of eval months pass, so budget **~3-4 attempts (~$120 in
-promo fees) per funded account**. Risking more passes faster but busts more;
-risking less starves the target. The sequential replay over the same history
-(attempts not capped at 30 days) passed 11 of 29 back-to-back evals (38%).
+The sequential replay over the same history (attempts not capped at 30 days)
+passed 14 of 37 back-to-back evals (38%, median 11 trading days per pass).
 Proxy-vs-futures signal parity over the recent overlap window: **91%**.
+
+**What moved the needle (kept):**
+- **ORB short veto** (+4.5pp): breakdown trades lose money on long-biased
+  indices (PF 0.94), and entries taken *during* a morning breakdown window
+  average -0.01R — so breakdowns aren't traded AND they block other entries
+  until the phantom short would have exited.
+- **Momentum gap filter 0.3 → 0.5 ATR** (+2pp): bigger gaps mark real trend
+  days. The 0.35-0.60 scan is a smooth plateau (34-37%), not a fitted spike.
+- **Risk taper near the target** (+1pp): never risk much more than the
+  remaining distance to the target — busting while almost done is the most
+  expensive way to fail.
+
+**What was tried and made things worse (rejected):** breakeven stops at
+0.8/1.0/1.5R (-3 to -6pp — they cut the EOD runners that carry the edge),
+time stops (-9pp), adaptive timid/bold sizing (-3 to -6pp), one-loss-per-day
+(neutral to -2pp), wider 45/60-min opening ranges (-9pp), 3R/4R/no targets
+(-1 to -2pp), adding YM/RTY (neutral — one position at a time means they just
+compete for the same slot).
+
+**Regime honesty** (chosen config, per-period P(pass) at 20-25% risk):
+2023: 47.5% · 2024: 38.5% · 2025: **13.6%** · 2026 ytd: 42.4%. In a chop
+year like 2025 the expected cost per pass rises to ~$260 (~7 attempts). The
+edge is regime-dependent; the headline 36.9% averages over good and bad
+regimes.
 
 ## Honest caveats
 

@@ -91,27 +91,43 @@ def size_micros(risk_budget: float, risk_per_contract: float, max_contracts: int
 
 
 def simulate_trade(session: pd.DataFrame, entry_idx: int, sig: Signal,
-                   instr: Instrument, costs: Costs) -> TradeRecord:
+                   instr: Instrument, costs: Costs,
+                   mgmt: dict | None = None) -> TradeRecord:
+    """`mgmt` options (all optional):
+      breakeven_at_r: once price has moved this many R in favor, stop moves to
+        entry (applied at bar close — a stop can't be saved by the same bar
+        that would have moved it).
+      time_stop_bars / time_stop_min_r: exit at close after N bars unless the
+        trade has reached min_r R.
+    """
+    mgmt = mgmt or {}
+    be_at_r = mgmt.get("breakeven_at_r")
+    ts_bars = mgmt.get("time_stop_bars")
+    ts_min_r = float(mgmt.get("time_stop_min_r", 0.5))
+
     slip = costs.slippage_ticks * instr.tick_size
     entry = float(session["open"].iloc[entry_idx]) + sig.side * slip
     pv = instr.point_value
+    risk_pts = abs(entry - sig.stop)
     low_pnl, high_pnl = [], []
     exit_price, exit_reason, exit_i = None, "eod", len(session) - 1
+    stop = sig.stop
 
     for i in range(entry_idx, len(session)):
         bar = session.iloc[i]
         if sig.side > 0:
             worst, best = (bar["low"] - entry) * pv, (bar["high"] - entry) * pv
-            hit_stop, hit_target = bar["low"] <= sig.stop, bar["high"] >= sig.target
+            hit_stop, hit_target = bar["low"] <= stop, bar["high"] >= sig.target
         else:
             worst, best = (entry - bar["high"]) * pv, (entry - bar["low"]) * pv
-            hit_stop, hit_target = bar["high"] >= sig.stop, bar["low"] <= sig.target
+            hit_stop, hit_target = bar["high"] >= stop, bar["low"] <= sig.target
         if hit_stop:  # stop assumed first when both hit in one bar
-            exit_price = sig.stop - sig.side * slip
+            exit_price = stop - sig.side * slip
             worst = min(worst, (exit_price - entry) * pv * sig.side)
             low_pnl.append(worst)
             high_pnl.append(min(best, 0.0) if hit_stop and not hit_target else best)
-            exit_reason, exit_i = "stop", i
+            exit_reason = "breakeven" if stop != sig.stop else "stop"
+            exit_i = i
             break
         low_pnl.append(worst)
         high_pnl.append(best)
@@ -119,6 +135,15 @@ def simulate_trade(session: pd.DataFrame, entry_idx: int, sig: Signal,
             exit_price = sig.target - sig.side * slip
             exit_reason, exit_i = "target", i
             break
+        bars_held = i - entry_idx + 1
+        unrealized_r = (bar["close"] - entry) * sig.side / risk_pts if risk_pts > 0 else 0.0
+        if ts_bars and bars_held >= ts_bars and unrealized_r < ts_min_r:
+            exit_price = float(bar["close"]) - sig.side * slip
+            exit_reason, exit_i = "time", i
+            break
+        if be_at_r and risk_pts > 0 and unrealized_r >= 0 and \
+                best >= be_at_r * risk_pts * pv:
+            stop = max(stop, entry) if sig.side > 0 else min(stop, entry)
 
     if exit_price is None:
         exit_price = float(session["close"].iloc[-1]) - sig.side * slip
@@ -139,7 +164,8 @@ def simulate_trade(session: pd.DataFrame, entry_idx: int, sig: Signal,
 def generate_trades(bars_by_symbol: dict[str, pd.DataFrame],
                     strategies: list[Strategy],
                     instruments: dict[str, Instrument],
-                    costs: Costs) -> list[TradeRecord]:
+                    costs: Costs,
+                    mgmt: dict | None = None) -> list[TradeRecord]:
     """One position at a time, account-wide (high-conviction sizing needs the
     full drawdown budget behind each trade). Signals are taken in time order;
     overlapping ones are skipped."""
@@ -165,9 +191,10 @@ def generate_trades(bars_by_symbol: dict[str, pd.DataFrame],
         for ts, bar_idx, sig, session in candidates:
             if busy_until is not None and ts < busy_until:
                 continue
-            trade = simulate_trade(session, bar_idx + 1, sig, instruments[sig.symbol], costs)
-            trades.append(trade)
+            trade = simulate_trade(session, bar_idx + 1, sig, instruments[sig.symbol], costs, mgmt)
             busy_until = trade.exit_time
+            if sig.action != "veto":  # veto signals block the window untraded
+                trades.append(trade)
     return trades
 
 
@@ -182,12 +209,15 @@ class EvalAttempt:
 
 
 def run_eval_sequence(trades: list[TradeRecord], rules: AccountRules,
-                      risk_frac: float, aplus_multiplier: float = 1.5) -> list[EvalAttempt]:
+                      risk_frac: float, aplus_multiplier: float = 1.5,
+                      taper: bool = True) -> list[EvalAttempt]:
     """Replay day-ordered trades through back-to-back eval attempts.
 
     Sizing: each trade risks `risk_frac` of the trailing drawdown (A+ signals
     risk `risk_frac * aplus_multiplier`), converted to micro-granular size via
-    the trade's stop distance. Once the target is hit but min trading days
+    the trade's stop distance. With `taper`, the budget never much exceeds the
+    remaining distance to the target — no point risking $625 when $200 of
+    profit finishes the eval. Once the target is hit but min trading days
     aren't met, later signals drop to 1 micro to log days without risking the
     pass.
     """
@@ -201,6 +231,9 @@ def run_eval_sequence(trades: list[TradeRecord], rules: AccountRules,
         budget = risk_frac * rules.trailing_drawdown
         if tr.grade == "A+":
             budget *= aplus_multiplier
+        if taper:
+            remaining = max(0.0, tracker.target_balance - tracker.balance)
+            budget = min(budget, max(remaining, 0.04 * rules.trailing_drawdown))
         micros = size_micros(budget, tr.risk_per_contract, rules.max_contracts)
         if tracker.target_pending():
             micros = min(micros, 1)

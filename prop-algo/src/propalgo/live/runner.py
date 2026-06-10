@@ -15,7 +15,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from ..backtest.engine import ET, daily_atr_series, rth_sessions, size_micros
+from ..backtest.engine import (ET, daily_atr_series, rth_sessions, simulate_trade,
+                               size_micros)
 from ..config import Config, PROJECT_ROOT
 from ..data.yahoo import YahooSource
 from ..strategies import build_strategies
@@ -48,6 +49,9 @@ def run_cycle(cfg: Config, risk_frac: float, dry_run: bool = False,
 
     sent = 0
     start = datetime.now(timezone.utc) - timedelta(days=40)
+    # gather today's signals across all symbols, then walk them in time order
+    # with the same one-position/veto logic as the backtest engine
+    candidates = []   # (ts, bar_idx, sig, session, today)
     for sym in symbols:
         try:
             bars = source.fetch(sym, start)
@@ -63,23 +67,41 @@ def run_cycle(cfg: Config, risk_frac: float, dry_run: bool = False,
         atr = atrs.get(today) or 0.0
         for strat in strategies:
             for bar_idx, sig in strat.on_session(sym, session, atr):
-                # only alert if the signal bar is the most recent closed bar
-                if bar_idx < len(session) - 2:
-                    continue
-                key = _signal_key(today, sig)
-                if key in state["fired"]:
-                    continue
-                budget = risk_frac * cfg.account.trailing_drawdown
-                if sig.grade == "A+":
-                    budget *= aplus_mult
-                instr = cfg.instruments[sym]
-                micros = size_micros(budget, sig.risk_points * instr.point_value,
-                                     cfg.account.max_contracts)
-                if micros == 0:
-                    continue
-                send_alert(format_signal(sig, micros), cfg.live.get("webhook_env", "DISCORD_WEBHOOK_URL"), dry_run)
-                state["fired"].append(key)
-                sent += 1
+                candidates.append((session.index[bar_idx], bar_idx, sig, session, today))
+
+    candidates.sort(key=lambda c: c[0])
+    busy_until = None
+    for ts, bar_idx, sig, session, today in candidates:
+        if busy_until is not None and ts < busy_until:
+            continue
+        instr = cfg.instruments[sig.symbol]
+        if bar_idx < len(session) - 2:
+            # earlier today: replay it (trade or phantom veto) to know how
+            # long it occupies the account
+            trade = simulate_trade(session, bar_idx + 1, sig, instr, cfg.costs)
+            busy_until = trade.exit_time
+            continue
+        if sig.action == "veto":
+            # live breakdown just fired: hostile window for the rest of the
+            # day (next cycles will re-derive the phantom exit as bars arrive)
+            busy_until = session.index[-1] + timedelta(hours=8)
+            continue
+        # signal on the most recent closed bar -> actionable now
+        key = _signal_key(today, sig)
+        if key in state["fired"]:
+            continue
+        budget = risk_frac * cfg.account.trailing_drawdown
+        if sig.grade == "A+":
+            budget *= aplus_mult
+        risk_per_mini = sig.risk_points * instr.point_value
+        micros = size_micros(budget, risk_per_mini, cfg.account.max_contracts)
+        if micros == 0:
+            continue
+        send_alert(format_signal(sig, micros, risk_per_mini / 10.0),
+                   cfg.live.get("webhook_env", "DISCORD_WEBHOOK_URL"), dry_run)
+        state["fired"].append(key)
+        sent += 1
+        busy_until = session.index[-1] + timedelta(hours=8)  # one position at a time
     state["fired"] = state["fired"][-200:]
     state["last_cycle"] = datetime.now(timezone.utc).isoformat()
     _save_state(state_path, state)

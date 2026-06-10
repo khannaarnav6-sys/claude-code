@@ -6,6 +6,12 @@ following bars signals continuation; stop is the opposite side of the range
 bars with above-average volume grade A+. Skips days whose opening range is
 already wider than `max_or_atr` x ATR — the "big win" days are orderly
 breakouts, not opening chop.
+
+`shorts` param: "trade" (normal), "skip" (long-only), or "veto" — don't trade
+breakdowns (they lose money on long-biased indices, PF 0.94) but treat the
+breakdown window as hostile and block other entries until the phantom short
+would have exited. The veto was worth +4.5pp of P(pass) in the 2023-2026
+sample: entries taken during morning breakdowns averaged -0.01R.
 """
 from __future__ import annotations
 
@@ -22,6 +28,7 @@ class OpeningRangeBreakout(Strategy):
         target_r = float(self.params.get("target_r", 2.0))
         max_or_atr = float(self.params.get("max_or_atr", 1.5))
         min_vol_ratio = float(self.params.get("min_volume_ratio", 1.0))
+        shorts = self.params.get("shorts", "skip" if self.params.get("long_only") else "trade")
 
         if len(session) <= or_bars + 1:
             return []
@@ -40,7 +47,7 @@ class OpeningRangeBreakout(Strategy):
                 side = 1
             elif close < or_low:
                 side = -1
-            if side == 0:
+            if side == 0 or (side < 0 and shorts == "skip"):
                 continue
             stop_dist = min(or_range, daily_atr) if daily_atr > 0 else or_range
             stop = close - side * stop_dist
@@ -51,5 +58,6 @@ class OpeningRangeBreakout(Strategy):
                 entry_ref=close, stop=stop, target=target,
                 grade="A+" if vol_ok else "A",
                 note=f"OR {or_low:.2f}-{or_high:.2f} break {'up' if side > 0 else 'down'}",
+                action="veto" if (side < 0 and shorts == "veto") else "trade",
             ))]
         return []

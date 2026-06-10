@@ -8,17 +8,24 @@ import requests
 from ..strategies.base import Signal
 
 
-def format_signal(sig: Signal, micros: int) -> str:
+def format_signal(sig: Signal, micros: int, risk_per_micro: float | None = None) -> str:
     side = "LONG" if sig.side > 0 else "SHORT"
     minis, rem = divmod(micros, 10)
     size = f"{micros} micros" if minis == 0 else (
         f"{minis} minis" if rem == 0 else f"{minis} minis + {rem} micros")
-    return (
-        f"**{side} {sig.symbol} x {size}**  [{sig.strategy} / {sig.grade}]\n"
-        f"entry ~ `{sig.entry_ref:.2f}`  stop `{sig.stop:.2f}`  target `{sig.target:.2f}`\n"
-        f"{sig.note}\n"
-        f"_Manual execution only — place the order yourself in Tradovate._"
-    )
+    lines = [
+        f"**{side} {sig.symbol} x {size}**  [{sig.strategy} / {sig.grade}]",
+        f"entry ~ `{sig.entry_ref:.2f}`  stop `{sig.stop:.2f}`  target `{sig.target:.2f}`",
+        sig.note,
+    ]
+    if risk_per_micro:
+        total = micros * risk_per_micro
+        lines.append(
+            f"risk ≈ ${total:,.0f} (${risk_per_micro:,.0f}/micro) — taper: if you're "
+            f"less than ${total:,.0f} from the target, take ~remaining/"
+            f"${risk_per_micro:,.0f} micros instead.")
+    lines.append("_Manual execution only — place the order yourself in Tradovate._")
+    return "\n".join(lines)
 
 
 def send_alert(message: str, webhook_env: str = "DISCORD_WEBHOOK_URL",

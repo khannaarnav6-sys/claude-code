@@ -42,17 +42,23 @@ strategies:
     min_volume_ratio: 1.0      # breakout bar volume vs 20-bar average for A+ grade
     target_r: 2.0              # scale target in R multiples
     max_or_atr: 1.5            # skip if opening range wider than 1.5x ATR(14d)
+    shorts: veto               # breakdowns aren't traded (PF 0.94 on long-biased
+                               # indices) but block other entries while the
+                               # phantom short would be open -- worth +4.5pp P(pass)
   momentum:
     enabled: true
-    gap_atr: 0.30              # overnight gap must exceed 0.3x daily ATR
+    gap_atr: 0.50              # overnight gap must exceed 0.5x daily ATR; the
+                               # 0.35-0.60 scan is a smooth plateau (34-37% pass),
+                               # so this is a stable choice, not a fitted spike
     vwap_hold_bars: 3          # bars price must hold the gap side of VWAP
     target_r: 2.5
 
 sizing:
-  risk_frac: 0.20              # per-trade risk as fraction of trailing DD;
-                               # 0.20 maximized P(pass) in the 2023-2026 sweep
-                               # -- re-tune with `montecarlo` as data grows
+  risk_frac: 0.25              # per-trade risk as fraction of trailing DD;
+                               # 0.25 maximized P(pass) in the 2023-2026 sweep
+                               # with taper on -- re-tune with `montecarlo`
   aplus_multiplier: 1.5        # A+ signals risk 1.5x the budget
+  taper: true                  # near the target, risk only what's left to gain
 
 live:
   instruments: [NQ, ES]
