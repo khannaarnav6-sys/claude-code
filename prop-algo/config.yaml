@@ -1,0 +1,59 @@
+# Apex $50K evaluation rules (parameterized; other sizes can be added)
+account:
+  name: apex50k
+  start_balance: 50000.0
+  profit_target: 3000.0        # pass at balance >= 53,000 (realized, while flat)
+  trailing_drawdown: 2500.0    # trails REAL-TIME equity high-water mark (incl. unrealized peaks)
+  max_contracts: 10
+  min_trading_days: 7          # Apex promos often waive to 1 -- override with --min-days
+  eval_fee: 35.0               # monthly fee per attempt (promo pricing)
+
+# Instruments: dukascopy = multi-year backtest proxy, yahoo = live/recent true futures
+instruments:
+  NQ:
+    dukascopy: E_NQ-100
+    yahoo: NQ=F
+    point_value: 20.0
+    tick_size: 0.25
+  ES:
+    dukascopy: E_SandP-500
+    yahoo: ES=F
+    point_value: 50.0
+    tick_size: 0.25
+  YM:
+    dukascopy: E_D&J-Ind
+    yahoo: YM=F
+    point_value: 5.0
+    tick_size: 1.0
+  RTY:
+    dukascopy: USSC2000.IDX/USD
+    yahoo: RTY=F
+    point_value: 50.0
+    tick_size: 0.1
+
+costs:
+  commission_rt: 4.0           # $ round-trip per contract
+  slippage_ticks: 1            # per side
+
+strategies:
+  orb:
+    enabled: true
+    or_minutes: 30             # opening range = first 30 min (two 15m bars) from 9:30 ET
+    min_volume_ratio: 1.0      # breakout bar volume vs 20-bar average for A+ grade
+    target_r: 2.0              # scale target in R multiples
+    max_or_atr: 1.5            # skip if opening range wider than 1.5x ATR(14d)
+  momentum:
+    enabled: true
+    gap_atr: 0.30              # overnight gap must exceed 0.3x daily ATR
+    vwap_hold_bars: 3          # bars price must hold the gap side of VWAP
+    target_r: 2.5
+
+sizing:
+  base_contracts: 4            # overridden by `montecarlo` sweep recommendation
+  aplus_multiplier: 1.5        # A+ signals sized up (capped at max_contracts)
+
+live:
+  instruments: [NQ, ES]
+  poll_interval_min: 15
+  webhook_env: DISCORD_WEBHOOK_URL
+  state_file: live_state.json

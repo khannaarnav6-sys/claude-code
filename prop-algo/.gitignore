@@ -1,0 +1,6 @@
+data_cache/
+live_state.json
+__pycache__/
+*.pyc
+.pytest_cache/
+trades*.csv

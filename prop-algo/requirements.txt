@@ -1,0 +1,8 @@
+pandas>=2.0
+numpy>=1.24
+pyarrow>=14.0
+yfinance>=0.2.40
+dukascopy-python>=4.0
+pyyaml>=6.0
+requests>=2.31
+pytest>=7.4
