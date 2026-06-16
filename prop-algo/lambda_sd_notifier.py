@@ -31,7 +31,8 @@ DEPLOY ON AWS LAMBDA
       TELEGRAM_BOT_TOKEN   (required)  from @BotFather
       TELEGRAM_CHAT_ID     (required)  your chat/channel id (talk to @userinfobot)
       SYMBOLS              default "MES=F,MNQ=F"
-      INTERVAL             default "15m"
+      INTERVALS            default "15m,5m"  (checked independently; one alert
+                             per symbol per timeframe per bar)
       RANGE                default "5d"    (Yahoo history window to pull)
       VWAP_ANCHOR          default "session"  where the VWAP resets each day:
                              "session" = 18:00 ET (CME Globex open, TV default
@@ -208,7 +209,9 @@ def _save_seen(seen: dict) -> None:
 def check_symbols() -> list[dict]:
     """Evaluate every configured symbol; return the list of alerts emitted."""
     symbols = [s.strip() for s in _env("SYMBOLS", "MES=F,MNQ=F").split(",") if s.strip()]
-    interval = _env("INTERVAL", "15m")
+    # INTERVALS (plural) is the new knob; INTERVAL kept for backwards compat
+    intervals = [i.strip() for i in _env("INTERVALS", _env("INTERVAL", "15m,5m")).split(",")
+                 if i.strip()]
     rng = _env("RANGE", "5d")
     anchor = _env("VWAP_ANCHOR", "session").lower()
     band_sd = float(_env("BAND_SD", "3.0"))
@@ -230,39 +233,42 @@ def check_symbols() -> list[dict]:
     seen = _load_seen()
     alerts = []
     for symbol in symbols:
-        try:
-            bars = fetch_bars(symbol, interval, rng)
-        except Exception as exc:  # one bad symbol shouldn't sink the others
-            print(f"[{symbol}] fetch failed: {type(exc).__name__}: {exc}")
-            continue
+        for interval in intervals:
+            tag = f"{symbol} {interval}"
+            try:
+                bars = fetch_bars(symbol, interval, rng)
+            except Exception as exc:  # one bad fetch shouldn't sink the rest
+                print(f"[{tag}] fetch failed: {type(exc).__name__}: {exc}")
+                continue
 
-        if use_closed and len(bars) > 1:
-            bars = bars[:-1]  # drop the still-forming bar
-        stat = compute_vwap_bands(bars, anchor, min_bars)
-        if stat is None:
-            print(f"[{symbol}] not enough session data / flat VWAP; skipping")
-            continue
+            if use_closed and len(bars) > 1:
+                bars = bars[:-1]  # drop the still-forming bar
+            stat = compute_vwap_bands(bars, anchor, min_bars)
+            if stat is None:
+                print(f"[{tag}] not enough session data / flat VWAP; skipping")
+                continue
 
-        bar_time = bars[-1][0]
-        triggered = abs(stat["z"]) >= threshold
-        print(f"[{symbol}] z={stat['z']:+.2f} price={stat['price']:.2f} "
-              f"vwap={stat['vwap']:.2f} sigma={stat['sigma']:.2f} "
-              f"({stat['session_bars']} bars) {'ALERT' if triggered else 'ok'}")
-        if not triggered:
-            continue
+            bar_time = bars[-1][0]
+            triggered = abs(stat["z"]) >= threshold
+            print(f"[{tag}] z={stat['z']:+.2f} price={stat['price']:.2f} "
+                  f"vwap={stat['vwap']:.2f} sigma={stat['sigma']:.2f} "
+                  f"({stat['session_bars']} bars) {'ALERT' if triggered else 'ok'}")
+            if not triggered:
+                continue
 
-        if seen.get(symbol) == bar_time:
-            print(f"[{symbol}] already alerted for bar {bar_time}; skipping")
-            continue
+            dedup_key = f"{symbol}:{interval}"
+            if seen.get(dedup_key) == bar_time:
+                print(f"[{tag}] already alerted for bar {bar_time}; skipping")
+                continue
 
-        text = format_alert(symbol, stat, bar_time, band_sd, anchor, interval)
-        if dry_run:
-            print("--- ALERT (dry-run) ---\n" + text + "\n-----------------------")
-        else:
-            send_telegram(token, chat_id, text)
-        seen[symbol] = bar_time
-        alerts.append({"symbol": symbol, "z": round(stat["z"], 3),
-                       "bar_time": bar_time})
+            text = format_alert(symbol, stat, bar_time, band_sd, anchor, interval)
+            if dry_run:
+                print("--- ALERT (dry-run) ---\n" + text + "\n-----------------------")
+            else:
+                send_telegram(token, chat_id, text)
+            seen[dedup_key] = bar_time
+            alerts.append({"symbol": symbol, "interval": interval,
+                           "z": round(stat["z"], 3), "bar_time": bar_time})
 
     _save_seen(seen)
     return alerts
