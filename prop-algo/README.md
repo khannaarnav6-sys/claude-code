@@ -45,6 +45,21 @@ some evals is a priced-in part of the strategy, not a surprise.
   Tradovate yourself.** Apex prohibits fully automated trading; this design
   keeps you compliant.
 
+## Standalone 3-sigma Telegram notifier (`lambda_sd_notifier.py`)
+
+A separate, self-contained one-file tool — **zero pip dependencies, standard
+library only** — that alerts via Telegram when MES / MNQ price action
+approaches the 3-sigma band (|z-score| >= 2.8 over a rolling 15m window). It's
+built to drop straight into AWS Lambda on an EventBridge schedule (no layers,
+no packaging). All config is via environment variables; see the docstring at
+the top of the file for deploy steps and the tunables (`SYMBOLS`, `LOOKBACK`,
+`SD_THRESHOLD`, ...). Test locally with:
+
+```bash
+TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... python lambda_sd_notifier.py
+# or DRY_RUN=1 to print alerts instead of sending
+```
+
 ## Sizing model
 
 Fixed-contract sizing does not survive contact with this account: index
