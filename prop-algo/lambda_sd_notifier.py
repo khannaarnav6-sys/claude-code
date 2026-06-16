@@ -24,9 +24,14 @@ DEPLOY ON AWS LAMBDA
 ------------------------------------------------------------------------------
   * Runtime: Python 3.11+, handler = lambda_sd_notifier.lambda_handler
   * No dependencies, so just zip this one file (or paste it into the console).
-  * Trigger: EventBridge (CloudWatch Events) schedule. To check on every 15m
-    bar close during US futures RTH, e.g. rate(15 minutes), or a cron like
-    cron(2/15 13-20 ? * MON-FRI *) to run a couple minutes after each close.
+  * Trigger: EventBridge (CloudWatch Events) schedule -> rate(1 minute).
+    Polling every minute catches both the 5m and 15m bar closes within a
+    minute; the 5m/15m bars are far less noisy than 1m. The per-bar dedup
+    (keyed on symbol+interval) means a once-a-minute wake never double-alerts
+    on the same bar. Cost on the AWS always-free tier is negligible:
+      ~43,800 runs/month x 0.125 GB-s (128 MB, ~1s) = ~1.4% of 400k GB-s,
+      and ~4.4% of the 1M free invocations. Yahoo load is 4 requests/run =
+      240 req/hour, comfortably under its informal throttle.
   * Set these environment variables:
       TELEGRAM_BOT_TOKEN   (required)  from @BotFather
       TELEGRAM_CHAT_ID     (required)  your chat/channel id (talk to @userinfobot)
