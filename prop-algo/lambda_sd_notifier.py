@@ -2,22 +2,43 @@
 """Telegram notifier: alerts when MES / MNQ price approaches the 3rd VWAP SD band.
 
 Single file, ZERO third-party dependencies (standard library only) so it drops
-straight into AWS Lambda with no layers or packaging step. It pulls free 15m
-bars from Yahoo Finance's chart API and reproduces TradingView's *VWAP with
-standard-deviation bands* indicator: a session-anchored, volume-weighted
-average price (VWAP) plus bands at +/- N volume-weighted standard deviations.
-It sends a Telegram message when the latest price gets close to the 3rd SD band
-in either direction.
+straight into AWS Lambda with no layers or packaging step. It reproduces
+TradingView's *VWAP with standard-deviation bands* indicator: a session-anchored,
+volume-weighted average price plus bands at +/- N volume-weighted standard
+deviations, and sends a Telegram message when the latest price gets close to the
+3rd SD band in either direction.
 
 "Approaching the 3 SD band" => alert fires once |z| >= SD_THRESHOLD (default
-2.8), where z = (price - VWAP) / sigma_vwap, i.e. just before price reaches
-+/-3 sigma.
+2.8), where z = (price - VWAP) / sigma_vwap.
 
-How the bands are computed (matches TradingView's VWAP), anchored to the
-current session and using the typical price hlc3 = (high+low+close)/3:
+Band math (matches TradingView), anchored to the current session, typical price
+hlc3 = (high+low+close)/3:
     VWAP    = sum(volume * hlc3) / sum(volume)
     sigma   = sqrt( sum(volume * hlc3^2) / sum(volume) - VWAP^2 )
     band_k  = VWAP +/- k * sigma          (k = BAND_SD, default 3)
+
+------------------------------------------------------------------------------
+DATA SOURCES (failover)
+------------------------------------------------------------------------------
+Tried in the order given by SOURCES (default "yahoo,dukascopy"):
+
+  * yahoo     -- real CME futures (MES=F/MNQ=F) WITH real volume, so the VWAP
+                 and SD bands match your trading platform. Primary. Downside:
+                 Yahoo throttles AWS IP ranges, so it can return 429/999 from
+                 Lambda; the function retries, then fails over.
+  * dukascopy -- free, no key, cloud-friendly (not throttled like Yahoo). Pulls
+                 the underlying CASH index via the public tick feed and decodes
+                 it with stdlib lzma/struct. IMPORTANT: its index "volume" is
+                 flat, so the SD bands degrade to an UNWEIGHTED standard
+                 deviation, and prices are the cash index (offset from the
+                 futures by the basis, ~tens of points). The z-score / "near 3
+                 SD" trigger is still valid (price and VWAP share the same
+                 series, so the offset cancels); only the printed absolute
+                 levels differ. Used only as a keep-alive backup when Yahoo
+                 fails -- alerts from it are clearly labeled BACKUP.
+
+So normal operation is accurate (Yahoo); during a Yahoo/AWS block the notifier
+stays alive on Dukascopy with honestly-labeled approximate bands.
 
 ------------------------------------------------------------------------------
 DEPLOY ON AWS LAMBDA
@@ -29,7 +50,7 @@ DEPLOY ON AWS LAMBDA
     minute; the 5m/15m bars are far less noisy than 1m. The per-bar dedup
     (keyed on symbol+interval) means a once-a-minute wake never double-alerts
     on the same bar. Cost on the AWS always-free tier is negligible:
-      ~43,800 runs/month x 0.125 GB-s (128 MB, ~1s) = ~1.4% of 400k GB-s,
+      ~43,800 runs/month x ~0.13 GB-s (128 MB, ~1s) = ~1.5% of 400k GB-s,
       and ~4.4% of the 1M free invocations. Yahoo load is 4 requests/run =
       240 req/hour, comfortably under its informal throttle.
   * Set these environment variables:
@@ -38,6 +59,7 @@ DEPLOY ON AWS LAMBDA
       SYMBOLS              default "MES=F,MNQ=F"
       INTERVALS            default "15m,5m"  (checked independently; one alert
                              per symbol per timeframe per bar)
+      SOURCES              default "yahoo,dukascopy"  (failover order)
       RANGE                default "5d"    (Yahoo history window to pull)
       VWAP_ANCHOR          default "session"  where the VWAP resets each day:
                              "session" = 18:00 ET (CME Globex open, TV default
@@ -58,8 +80,11 @@ Add DRY_RUN=1 to print alerts instead of sending them.
 from __future__ import annotations
 
 import json
+import lzma
 import math
 import os
+import struct
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, time, timedelta, timezone
@@ -67,7 +92,9 @@ from zoneinfo import ZoneInfo
 
 YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
+DUKAS_FEED = "https://datafeed.dukascopy.com/datafeed/{inst}/{y}/{m:02d}/{d:02d}/{h:02d}h_ticks.bi5"
 ET = ZoneInfo("America/New_York")
+UA = {"User-Agent": "Mozilla/5.0"}
 
 # session anchor name -> local ET time of day the VWAP resets at
 ANCHORS = {
@@ -76,22 +103,48 @@ ANCHORS = {
     "day": time(0, 0),        # midnight ET
 }
 
+# Dukascopy backup: futures symbol -> (cash-index instrument, integer scale)
+DUKAS_MAP = {
+    "MES=F": ("USA500IDXUSD", 1000.0), "ES=F": ("USA500IDXUSD", 1000.0),
+    "MNQ=F": ("USATECHIDXUSD", 1000.0), "NQ=F": ("USATECHIDXUSD", 1000.0),
+}
+
 
 def _env(name: str, default: str) -> str:
     return os.environ.get(name, default)
 
 
-def fetch_bars(symbol: str, interval: str, rng: str) -> list[tuple[int, float, float, float, float]]:
-    """Return complete bars as (epoch, high, low, close, volume), oldest first.
+def parse_interval_seconds(interval: str) -> int:
+    interval = interval.strip().lower()
+    unit = interval[-1]
+    n = int(interval[:-1])
+    return n * {"m": 60, "h": 3600, "d": 86400}[unit]
 
-    Bars missing any of high/low/close/volume (gaps) are dropped so VWAP and its
-    variance only accumulate real prints.
-    """
+
+# --------------------------------------------------------------------------- #
+# Source 1: Yahoo (primary, real futures + real volume)
+# --------------------------------------------------------------------------- #
+def fetch_yahoo(symbol: str, interval: str, rng: str,
+                retries: int = 2) -> list[tuple[int, float, float, float, float]]:
     url = YAHOO_CHART.format(symbol=urllib.parse.quote(symbol))
     url += "?" + urllib.parse.urlencode({"interval": interval, "range": rng})
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        payload = json.load(resp)
+    last_err = None
+    for attempt in range(retries + 1):
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=20) as r:
+                payload = json.load(r)
+            break
+        except urllib.error.HTTPError as exc:
+            last_err = exc
+            note = " (rate-limited / bot-blocked)" if exc.code in (429, 999) else ""
+            print(f"[{symbol} {interval}] yahoo HTTP {exc.code}{note}, "
+                  f"attempt {attempt + 1}/{retries + 1}")
+        except Exception as exc:  # timeouts, transient network
+            last_err = exc
+            print(f"[{symbol} {interval}] yahoo {type(exc).__name__}, "
+                  f"attempt {attempt + 1}/{retries + 1}")
+    else:
+        raise last_err
 
     result = payload["chart"]["result"][0]
     stamps = result["timestamp"]
@@ -104,23 +157,113 @@ def fetch_bars(symbol: str, interval: str, rng: str) -> list[tuple[int, float, f
     return bars
 
 
+# --------------------------------------------------------------------------- #
+# Source 2: Dukascopy (backup, cash index, flat volume -> unweighted bands)
+# --------------------------------------------------------------------------- #
+def _dukas_hour_bytes(inst: str, hour_dt: datetime, now: datetime) -> bytes:
+    """Raw .bi5 for one UTC hour. Completed hours are cached in /tmp (immutable)."""
+    url = DUKAS_FEED.format(inst=inst, y=hour_dt.year, m=hour_dt.month - 1,
+                            d=hour_dt.day, h=hour_dt.hour)
+    completed = hour_dt + timedelta(hours=1) <= now
+    cache = f"/tmp/dukas_{inst}_{hour_dt:%Y%m%d%H}.bi5"
+    if completed:
+        try:
+            with open(cache, "rb") as fh:
+                return fh.read()
+        except OSError:
+            pass
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=20) as r:
+            raw = r.read()
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            raw = b""  # no data this hour (weekend / maintenance break)
+        else:
+            raise
+    if completed and raw:
+        try:
+            with open(cache, "wb") as fh:
+                fh.write(raw)
+        except OSError:
+            pass
+    return raw
+
+
+def fetch_dukascopy(symbol: str, interval: str, rng: str,
+                    hours_back: int = 26) -> list[tuple[int, float, float, float, float]]:
+    inst, scale = DUKAS_MAP[symbol]  # KeyError -> caller logs + fails over
+    interval_sec = parse_interval_seconds(interval)
+    now = datetime.now(timezone.utc)
+    start_hour = (now - timedelta(hours=hours_back)).replace(minute=0, second=0, microsecond=0)
+
+    ohlc: dict[int, list[float]] = {}  # bar_epoch -> [high, low, close, tick_count]
+    hour_dt = start_hour
+    while hour_dt <= now:
+        hour_epoch = int(hour_dt.timestamp())
+        raw = _dukas_hour_bytes(inst, hour_dt, now)
+        if raw:
+            data = lzma.decompress(raw)
+            for i in range(0, len(data) - (len(data) % 20), 20):
+                ms, ask, bid, _av, _bv = struct.unpack(">IIIff", data[i:i + 20])
+                price = ((ask + bid) / 2.0) / scale
+                epoch = hour_epoch + ms // 1000
+                key = (epoch // interval_sec) * interval_sec
+                b = ohlc.get(key)
+                if b is None:
+                    ohlc[key] = [price, price, price, 1.0]
+                else:
+                    if price > b[0]:
+                        b[0] = price
+                    if price < b[1]:
+                        b[1] = price
+                    b[2] = price
+                    b[3] += 1.0
+        hour_dt += timedelta(hours=1)
+    # No real exchange volume on the index feed -> weight by TICK COUNT, which
+    # tracks activity and pulls the SD closer to the real volume-weighted bands.
+    return [(k, b[0], b[1], b[2], b[3]) for k, b in sorted(ohlc.items())]
+
+
+SOURCE_FUNCS = {"yahoo": fetch_yahoo, "dukascopy": fetch_dukascopy}
+REAL_VOLUME = {"yahoo": True, "dukascopy": False}
+
+
+def fetch_bars(symbol: str, interval: str, rng: str, sources: list[str]):
+    """Try each source in order; return (source_name, has_real_volume, bars)."""
+    last_err = None
+    for src in sources:
+        fn = SOURCE_FUNCS.get(src)
+        if fn is None:
+            print(f"unknown source '{src}', skipping")
+            continue
+        try:
+            bars = fn(symbol, interval, rng)
+            if bars:
+                return src, REAL_VOLUME[src], bars
+            print(f"[{symbol} {interval}] source {src} returned no bars")
+        except Exception as exc:
+            last_err = exc
+            print(f"[{symbol} {interval}] source {src} failed: "
+                  f"{type(exc).__name__}: {exc}")
+    if last_err:
+        raise last_err
+    raise RuntimeError("no data from any source")
+
+
+# --------------------------------------------------------------------------- #
+# VWAP + SD band math
+# --------------------------------------------------------------------------- #
 def anchor_epoch(latest_epoch: int, anchor: str) -> int:
-    """Epoch (UTC seconds) of the session anchor active for `latest_epoch`."""
     tod = ANCHORS.get(anchor, ANCHORS["session"])
     latest_et = datetime.fromtimestamp(latest_epoch, tz=timezone.utc).astimezone(ET)
     candidate = latest_et.replace(hour=tod.hour, minute=tod.minute,
                                   second=0, microsecond=0)
-    if latest_et < candidate:           # haven't reached today's reset yet
-        candidate -= timedelta(days=1)  # so we're still in yesterday's session
+    if latest_et < candidate:
+        candidate -= timedelta(days=1)
     return int(candidate.timestamp())
 
 
 def compute_vwap_bands(bars: list[tuple], anchor: str, min_bars: int) -> dict | None:
-    """Session-anchored VWAP + volume-weighted SD bands over the latest session.
-
-    Returns None if there aren't enough bars since the anchor or volume/variance
-    is degenerate.
-    """
     if not bars:
         return None
     start = anchor_epoch(bars[-1][0], anchor)
@@ -130,7 +273,7 @@ def compute_vwap_bands(bars: list[tuple], anchor: str, min_bars: int) -> dict | 
 
     cum_v = cum_pv = cum_pv2 = 0.0
     for _t, h, l, c, v in session:
-        tp = (h + l + c) / 3.0          # typical price (hlc3), TradingView source
+        tp = (h + l + c) / 3.0
         cum_v += v
         cum_pv += v * tp
         cum_pv2 += v * tp * tp
@@ -142,20 +285,15 @@ def compute_vwap_bands(bars: list[tuple], anchor: str, min_bars: int) -> dict | 
     if sigma == 0:
         return None
 
-    price = session[-1][3]              # latest close
-    z = (price - vwap) / sigma
+    price = session[-1][3]
     return {
-        "price": price,
-        "vwap": vwap,
-        "sigma": sigma,
-        "z": z,
-        "session_start": start,
-        "session_bars": len(session),
+        "price": price, "vwap": vwap, "sigma": sigma, "z": (price - vwap) / sigma,
+        "session_start": start, "session_bars": len(session),
     }
 
 
 def format_alert(symbol: str, stat: dict, bar_time: int, band_sd: float,
-                 anchor: str, interval: str) -> str:
+                 anchor: str, interval: str, source: str, approx: bool) -> str:
     z = stat["z"]
     direction = "ABOVE" if z > 0 else "BELOW"
     band = stat["vwap"] + math.copysign(band_sd * stat["sigma"], z)
@@ -164,24 +302,29 @@ def format_alert(symbol: str, stat: dict, bar_time: int, band_sd: float,
         "%Y-%m-%d %H:%M ET")
     sess = datetime.fromtimestamp(stat["session_start"], tz=timezone.utc).astimezone(
         ET).strftime("%m-%d %H:%M ET")
-    arrow = "\U0001F4C8" if z > 0 else "\U0001F4C9"  # chart up / chart down
-    return (
-        f"{arrow} *{symbol}* approaching {band_sd:g} SD from VWAP ({direction})\n"
-        f"z-score: *{z:+.2f}* sigma   ({interval}, {anchor} VWAP)\n"
+    arrow = "\U0001F4C8" if z > 0 else "\U0001F4C9"
+    lines = [
+        f"{arrow} *{symbol}* approaching {band_sd:g} SD from VWAP ({direction})",
+        f"z-score: *{z:+.2f}* sigma   ({interval}, {anchor} VWAP)",
         f"price: `{stat['price']:.2f}`   VWAP: `{stat['vwap']:.2f}`   "
-        f"1 sigma: `{stat['sigma']:.2f}`\n"
+        f"1 sigma: `{stat['sigma']:.2f}`",
         f"{band_sd:g} SD band ({direction.lower()}): `{band:.2f}`   "
-        f"distance: `{dist:.2f}` pts\n"
-        f"session anchored {sess} ({stat['session_bars']} bars)\n"
-        f"bar: {when}"
-    )
+        f"distance: `{dist:.2f}` pts",
+        f"session anchored {sess} ({stat['session_bars']} bars)",
+        f"bar: {when}",
+    ]
+    if approx:
+        lines.append("⚠️ BACKUP source (" + source + ", Yahoo was down): cash-index "
+                     "proxy, tick-count-weighted SD. APPROXIMATE — levels are "
+                     "offset from the futures and the band is a rough estimate; "
+                     "treat as a heads-up to check your chart, not an exact "
+                     f"{band_sd:g} SD touch.")
+    return "\n".join(lines)
 
 
 def send_telegram(token: str, chat_id: str, text: str) -> None:
     data = urllib.parse.urlencode({
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "Markdown",
+        "chat_id": chat_id, "text": text, "parse_mode": "Markdown",
         "disable_web_page_preview": "true",
     }).encode()
     req = urllib.request.Request(TELEGRAM_API.format(token=token), data=data)
@@ -208,15 +351,16 @@ def _save_seen(seen: dict) -> None:
         with open(_DEDUP_PATH, "w") as fh:
             json.dump(seen, fh)
     except OSError:
-        pass  # /tmp not writable -> just skip dedup, never fatal
+        pass
 
 
 def check_symbols() -> list[dict]:
-    """Evaluate every configured symbol; return the list of alerts emitted."""
+    """Evaluate every configured symbol x timeframe; return the alerts emitted."""
     symbols = [s.strip() for s in _env("SYMBOLS", "MES=F,MNQ=F").split(",") if s.strip()]
-    # INTERVALS (plural) is the new knob; INTERVAL kept for backwards compat
     intervals = [i.strip() for i in _env("INTERVALS", _env("INTERVAL", "15m,5m")).split(",")
                  if i.strip()]
+    sources = [s.strip().lower() for s in _env("SOURCES", "yahoo,dukascopy").split(",")
+               if s.strip()]
     rng = _env("RANGE", "5d")
     anchor = _env("VWAP_ANCHOR", "session").lower()
     band_sd = float(_env("BAND_SD", "3.0"))
@@ -241,9 +385,9 @@ def check_symbols() -> list[dict]:
         for interval in intervals:
             tag = f"{symbol} {interval}"
             try:
-                bars = fetch_bars(symbol, interval, rng)
-            except Exception as exc:  # one bad fetch shouldn't sink the rest
-                print(f"[{tag}] fetch failed: {type(exc).__name__}: {exc}")
+                source, has_vol, bars = fetch_bars(symbol, interval, rng, sources)
+            except Exception as exc:
+                print(f"[{tag}] all sources failed: {type(exc).__name__}: {exc}")
                 continue
 
             if use_closed and len(bars) > 1:
@@ -255,7 +399,7 @@ def check_symbols() -> list[dict]:
 
             bar_time = bars[-1][0]
             triggered = abs(stat["z"]) >= threshold
-            print(f"[{tag}] z={stat['z']:+.2f} price={stat['price']:.2f} "
+            print(f"[{tag}] src={source} z={stat['z']:+.2f} price={stat['price']:.2f} "
                   f"vwap={stat['vwap']:.2f} sigma={stat['sigma']:.2f} "
                   f"({stat['session_bars']} bars) {'ALERT' if triggered else 'ok'}")
             if not triggered:
@@ -266,13 +410,14 @@ def check_symbols() -> list[dict]:
                 print(f"[{tag}] already alerted for bar {bar_time}; skipping")
                 continue
 
-            text = format_alert(symbol, stat, bar_time, band_sd, anchor, interval)
+            text = format_alert(symbol, stat, bar_time, band_sd, anchor, interval,
+                                source, approx=not has_vol)
             if dry_run:
                 print("--- ALERT (dry-run) ---\n" + text + "\n-----------------------")
             else:
                 send_telegram(token, chat_id, text)
             seen[dedup_key] = bar_time
-            alerts.append({"symbol": symbol, "interval": interval,
+            alerts.append({"symbol": symbol, "interval": interval, "source": source,
                            "z": round(stat["z"], 3), "bar_time": bar_time})
 
     _save_seen(seen)
