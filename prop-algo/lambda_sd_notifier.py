@@ -80,6 +80,9 @@ DEPLOY ON AWS LAMBDA
       BAND_SD              default "3.0"  the band level you care about (sigmas)
       SD_THRESHOLD         default "2.8"  |z| at/above this fires the alert
       MIN_BARS             default "3"    bars needed since the anchor to bother
+      WARMUP_MIN           default "0"    suppress alerts for N minutes after the
+                             anchor (use ~30 with VWAP_ANCHOR=rth so the opening
+                             bars' tiny-sample bands don't fire false 3-SD signals)
       USE_LAST_CLOSED_BAR  default "1"    ignore the still-forming current bar
   * Give the function ~128MB and a 30s timeout; outbound internet (default
     Lambda networking, or a NAT gateway if you place it in a VPC).
@@ -466,6 +469,7 @@ def check_symbols() -> list[dict]:
     band_sd = float(_env("BAND_SD", "3.0"))
     threshold = float(_env("SD_THRESHOLD", "2.8"))
     min_bars = int(_env("MIN_BARS", "3"))
+    warmup_min = int(_env("WARMUP_MIN", "0"))  # skip alerts for N min after anchor
     use_closed = _env("USE_LAST_CLOSED_BAR", "1") == "1"
     dry_run = _env("DRY_RUN", "0") == "1"
 
@@ -499,6 +503,11 @@ def check_symbols() -> list[dict]:
                 continue
 
             bar_time = bars[-1][0]
+            elapsed_min = (bar_time - stat["session_start"]) / 60.0
+            if elapsed_min < warmup_min:
+                print(f"[{tag}] src={source} warming up "
+                      f"({elapsed_min:.0f}/{warmup_min} min since anchor); skip")
+                continue
             triggered = abs(stat["z"]) >= threshold
             print(f"[{tag}] src={source} anchor={eff_anchor} z={stat['z']:+.2f} "
                   f"price={stat['price']:.2f} vwap={stat['vwap']:.2f} "
