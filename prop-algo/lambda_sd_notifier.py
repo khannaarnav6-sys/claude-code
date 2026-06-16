@@ -87,6 +87,19 @@ DEPLOY ON AWS LAMBDA
 Run locally to test:  TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... \
                       python lambda_sd_notifier.py
 Add DRY_RUN=1 to print alerts instead of sending them.
+
+------------------------------------------------------------------------------
+RUN ON AN ALWAYS-ON VM (Oracle Cloud "Always Free", GCP free e2-micro, ...)
+------------------------------------------------------------------------------
+Instead of Lambda you can self-host (sidesteps Yahoo's AWS-IP throttling, keeps
+the real-futures session-anchored bands). No dependencies -> just Python 3.9+.
+Run the built-in scheduler (no cron needed):
+
+    python3 lambda_sd_notifier.py --loop          # every 60s
+    python3 lambda_sd_notifier.py --loop 30        # every 30s
+
+Best run as a systemd service with the secrets in a root-only EnvironmentFile;
+see the repo README for the exact unit file and Oracle setup steps.
 """
 from __future__ import annotations
 
@@ -95,6 +108,7 @@ import lzma
 import math
 import os
 import struct
+import time as wallclock  # 'time' name is taken by datetime.time below
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -235,12 +249,18 @@ def fetch_tradier(symbol: str, interval: str, rng: str):
 # --------------------------------------------------------------------------- #
 # Source 3: Dukascopy (last-resort backup, cash index, tick-count weighted)
 # --------------------------------------------------------------------------- #
+def _state_dir() -> str:
+    """Where dedup + Dukascopy hour cache live. Override with STATE_DIR (e.g. a
+    systemd StateDirectory) so they survive restarts; defaults to /tmp."""
+    return os.environ.get("STATE_DIR", "/tmp")
+
+
 def _dukas_hour_bytes(inst: str, hour_dt: datetime, now: datetime) -> bytes:
-    """Raw .bi5 for one UTC hour. Completed hours are cached in /tmp (immutable)."""
+    """Raw .bi5 for one UTC hour. Completed hours are cached (immutable)."""
     url = DUKAS_FEED.format(inst=inst, y=hour_dt.year, m=hour_dt.month - 1,
                             d=hour_dt.day, h=hour_dt.hour)
     completed = hour_dt + timedelta(hours=1) <= now
-    cache = f"/tmp/dukas_{inst}_{hour_dt:%Y%m%d%H}.bi5"
+    cache = os.path.join(_state_dir(), f"dukas_{inst}_{hour_dt:%Y%m%d%H}.bi5")
     if completed:
         try:
             with open(cache, "rb") as fh:
@@ -413,13 +433,14 @@ def send_telegram(token: str, chat_id: str, text: str) -> None:
         raise RuntimeError(f"Telegram API error: {body}")
 
 
-# --- best-effort, per-bar dedup so warm Lambda retries don't double-alert -----
-_DEDUP_PATH = "/tmp/sd_notifier_seen.json"
+# --- best-effort, per-bar dedup so warm restarts/retries don't double-alert ----
+def _dedup_path() -> str:
+    return os.path.join(_state_dir(), "sd_notifier_seen.json")
 
 
 def _load_seen() -> dict:
     try:
-        with open(_DEDUP_PATH) as fh:
+        with open(_dedup_path()) as fh:
             return json.load(fh)
     except (OSError, ValueError):
         return {}
@@ -427,7 +448,7 @@ def _load_seen() -> dict:
 
 def _save_seen(seen: dict) -> None:
     try:
-        with open(_DEDUP_PATH, "w") as fh:
+        with open(_dedup_path(), "w") as fh:
             json.dump(seen, fh)
     except OSError:
         pass
@@ -512,6 +533,30 @@ def lambda_handler(event, context):  # noqa: ARG001 - AWS signature
             "body": json.dumps({"alerts_sent": len(alerts), "alerts": alerts})}
 
 
+def run_loop(interval_sec: int = 60) -> None:
+    """Self-scheduling loop for always-on hosts (Oracle/GCP free VM, etc.) so no
+    cron is needed. Checks every `interval_sec`, aligned to the wall clock + a
+    few seconds so the latest 5m/15m bar has closed. One cycle's failure never
+    kills the loop, and the /tmp dedup file persists across cycles + restarts."""
+    print(f"[loop] starting; checking every {interval_sec}s "
+          f"(Ctrl-C / systemd stop to exit)")
+    while True:
+        try:
+            n = len(check_symbols())
+            print(f"[loop {datetime.now(timezone.utc):%H:%M}Z] {n} new alert(s)")
+        except Exception as exc:
+            print(f"[loop] cycle error: {type(exc).__name__}: {exc}")
+        now = wallclock.time()
+        next_t = (int(now // interval_sec) + 1) * interval_sec + 5  # +5s past close
+        wallclock.sleep(max(1, next_t - now))
+
+
 if __name__ == "__main__":
-    result = check_symbols()
-    print(f"\nDone. {len(result)} alert(s) sent.")
+    import sys
+    if "--loop" in sys.argv:
+        i = sys.argv.index("--loop")
+        secs = int(sys.argv[i + 1]) if i + 1 < len(sys.argv) and sys.argv[i + 1].isdigit() else 60
+        run_loop(secs)
+    else:
+        result = check_symbols()
+        print(f"\nDone. {len(result)} alert(s) sent.")

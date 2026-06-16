@@ -60,6 +60,76 @@ TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... python lambda_sd_notifier.py
 # or DRY_RUN=1 to print alerts instead of sending
 ```
 
+Data source failover order is `SOURCES` (default `yahoo,tradier,dukascopy`):
+Yahoo gives the real future and the 18:00 session VWAP; Tradier (set
+`TRADIER_TOKEN`) is a real-volume SPY/QQQ failover (RTH-anchored); Dukascopy is
+a last-resort cash-index proxy. Yahoo gets throttled from AWS IPs, so hosting on
+a non-AWS box is more reliable — see below.
+
+### Host on an Oracle Cloud "Always Free" VM (free, dodges AWS throttling)
+
+The script is one dependency-free file, so the VM only needs Python 3.9+. It
+self-schedules with `--loop` (no cron). This keeps the accurate Yahoo
+session-anchored bands while avoiding the AWS-IP rate limiting that hits Lambda.
+
+1. **Create the instance.** Oracle Cloud console -> Compute -> Instances ->
+   Create. Pick an **Always Free-eligible** shape (`VM.Standard.E2.1.Micro`,
+   AMD, is simplest/most available; the Ampere `A1.Flex` also works), image
+   **Ubuntu 22.04+**. Download the SSH key it offers. No inbound ports are
+   needed (the notifier only makes outbound calls), so leave the default
+   security list alone.
+2. **SSH in:** `ssh -i your_key ubuntu@<public-ip>` and confirm Python:
+   `python3 --version` (3.10 ships on 22.04 — fine; `zoneinfo`/tzdata are
+   already present).
+3. **Install the script:**
+   ```bash
+   sudo mkdir -p /opt/sdnotifier
+   sudo curl -fsSL -o /opt/sdnotifier/lambda_sd_notifier.py \
+     https://raw.githubusercontent.com/khannaarnav6-sys/claude-code/claude/session-6tv9tq/prop-algo/lambda_sd_notifier.py
+   ```
+   (or `scp` it up / paste it in).
+4. **Secrets in a root-only env file** `/etc/sdnotifier.env`:
+   ```ini
+   TELEGRAM_BOT_TOKEN=123456:abc...
+   TELEGRAM_CHAT_ID=987654321
+   # optional: enables the Tradier failover
+   TRADIER_TOKEN=
+   # keep dedup/cache across restarts (matches StateDirectory below)
+   STATE_DIR=/var/lib/sdnotifier
+   ```
+   `sudo chmod 600 /etc/sdnotifier.env`
+5. **systemd service** `/etc/systemd/system/sdnotifier.service`:
+   ```ini
+   [Unit]
+   Description=MES/MNQ 3-SD VWAP Telegram notifier
+   After=network-online.target
+   Wants=network-online.target
+
+   [Service]
+   Type=simple
+   EnvironmentFile=/etc/sdnotifier.env
+   Environment=PYTHONUNBUFFERED=1
+   ExecStart=/usr/bin/python3 /opt/sdnotifier/lambda_sd_notifier.py --loop 60
+   Restart=always
+   RestartSec=10
+   DynamicUser=yes
+   StateDirectory=sdnotifier
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+6. **Start it and watch logs:**
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now sdnotifier
+   journalctl -u sdnotifier -f
+   ```
+   You'll see one `[loop ...] N new alert(s)` line per minute. `Restart=always`
+   + `enable` means it survives crashes and reboots. To update the script,
+   re-download and `sudo systemctl restart sdnotifier`.
+
+(GCP's free `e2-micro` works identically — same steps from #2.)
+
 ## Sizing model
 
 Fixed-contract sizing does not survive contact with this account: index
