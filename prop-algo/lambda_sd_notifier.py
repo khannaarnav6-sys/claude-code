@@ -83,6 +83,12 @@ DEPLOY ON AWS LAMBDA
       WARMUP_MIN           default "0"    suppress alerts for N minutes after the
                              anchor (use ~30 with VWAP_ANCHOR=rth so the opening
                              bars' tiny-sample bands don't fire false 3-SD signals)
+      MAX_BAR_AGE_MIN      default "0"    skip if the latest bar is older than this
+                             many minutes -- guards against stale data (e.g. a
+                             real-time source going quiet, or an RTH-only source
+                             like tradier being polled overnight). NOTE Yahoo's
+                             futures feed is ~10 min delayed, so keep this >~20
+                             if Yahoo is in your SOURCES.
       USE_LAST_CLOSED_BAR  default "1"    ignore the still-forming current bar
   * Give the function ~128MB and a 30s timeout; outbound internet (default
     Lambda networking, or a NAT gateway if you place it in a VPC).
@@ -470,6 +476,7 @@ def check_symbols() -> list[dict]:
     threshold = float(_env("SD_THRESHOLD", "2.8"))
     min_bars = int(_env("MIN_BARS", "3"))
     warmup_min = int(_env("WARMUP_MIN", "0"))  # skip alerts for N min after anchor
+    max_bar_age = int(_env("MAX_BAR_AGE_MIN", "0"))  # skip if latest bar older than this
     use_closed = _env("USE_LAST_CLOSED_BAR", "1") == "1"
     dry_run = _env("DRY_RUN", "0") == "1"
 
@@ -503,6 +510,11 @@ def check_symbols() -> list[dict]:
                 continue
 
             bar_time = bars[-1][0]
+            bar_age_min = (datetime.now(timezone.utc).timestamp() - bar_time) / 60.0
+            if max_bar_age and bar_age_min > max_bar_age:
+                print(f"[{tag}] src={source} latest bar is {bar_age_min:.0f} min old "
+                      f"(> {max_bar_age}); stale, skip")
+                continue
             elapsed_min = (bar_time - stat["session_start"]) / 60.0
             if elapsed_min < warmup_min:
                 print(f"[{tag}] src={source} warming up "
