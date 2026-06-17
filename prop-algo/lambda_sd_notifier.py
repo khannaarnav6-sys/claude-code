@@ -108,6 +108,18 @@ Run the built-in scheduler (no cron needed):
     python3 lambda_sd_notifier.py --loop          # every 60s
     python3 lambda_sd_notifier.py --loop 30        # every 30s
 
+REAL-TIME mode (Tradier websocket trade stream -> tick-by-tick z):
+    python3 lambda_sd_notifier.py --ws
+Needs `websocket-client` (apt install python3-websocket) + TRADIER_TOKEN.
+Real-time price from the Tradier trade stream; VWAP/sigma bands from the BAND_TF
+REST feed refreshed every BANDS_REFRESH_SEC; alerts on |z|>=SD_THRESHOLD with
+hysteresis (re-arms only when |z| falls under REARM_SD, so ticks can't spam);
+auto-reconnects with backoff; after WS_MAX_FAILS consecutive failures it falls
+back to Yahoo 30s polling for WS_FALLBACK_MIN minutes, then retries the socket.
+  Extra env: BAND_TF (default 5m), BANDS_REFRESH_SEC (60), REARM_SD (2.0),
+  WS_MAX_FAILS (4), WS_FALLBACK_MIN (5), WS_STALE_CONN_SEC (90).
+ETF-proxy + RTH only (Tradier has no futures/overnight), so it forces RTH anchor.
+
 Best run as a systemd service with the secrets in a root-only EnvironmentFile;
 see the repo README for the exact unit file and Oracle setup steps.
 """
@@ -580,9 +592,191 @@ def run_loop(interval_sec: int = 60) -> None:
         wallclock.sleep(max(1, next_t - now))
 
 
+# --------------------------------------------------------------------------- #
+# Real-time websocket mode (Tradier trade stream -> tick-by-tick z, hysteresis)
+# --------------------------------------------------------------------------- #
+TRADIER_WS_URL = "wss://ws.tradier.com/v1/markets/events"
+TRADIER_SESSION_URL = "https://api.tradier.com/v1/markets/events/session"
+
+
+def _tradier_stream_session(token: str) -> str:
+    req = urllib.request.Request(TRADIER_SESSION_URL, data=b"", headers={
+        "Authorization": f"Bearer {token}", "Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.load(r)["stream"]["sessionid"]
+
+
+def _refresh_bands(symbol: str, band_tf: str, anchor: str, min_bars: int):
+    """VWAP/sigma from Tradier REST for the band timeframe. None on failure."""
+    try:
+        bars, meta = fetch_tradier(symbol, band_tf, "5d")
+    except Exception as exc:
+        print(f"[ws] band refresh {symbol} failed: {type(exc).__name__}: {exc}")
+        return None
+    eff = meta.get("anchor_override") or anchor
+    return compute_vwap_bands(bars, eff, min_bars)
+
+
+def _eval_tick(price: float, stat: dict | None, armed: bool, threshold: float,
+               rearm: float, warmup_min: float, now_epoch: float):
+    """Pure hysteresis state machine. Returns (action, new_armed, z) with action
+    in {'alert', 'rearm', None}. Alerts once on crossing >= threshold, then
+    stays silent until z falls back under `rearm` (so tick data can't spam)."""
+    if not stat or stat.get("sigma", 0) <= 0:
+        return None, armed, 0.0
+    if (now_epoch - stat["session_start"]) / 60.0 < warmup_min:
+        return None, armed, 0.0
+    z = (price - stat["vwap"]) / stat["sigma"]
+    az = abs(z)
+    if armed and az >= threshold:
+        return "alert", False, z
+    if (not armed) and az < rearm:
+        return "rearm", True, z
+    return None, armed, z
+
+
+def _poll_fallback(minutes: int) -> None:
+    """Yahoo 30s polling for `minutes`, then return so the ws can be retried."""
+    prev = os.environ.get("SOURCES")
+    os.environ["SOURCES"] = "yahoo"   # ws is down -> use the delayed-but-live feed
+    print(f"[ws] FALLBACK: Yahoo polling every 30s for {minutes} min")
+    end = wallclock.time() + minutes * 60
+    try:
+        while wallclock.time() < end:
+            try:
+                check_symbols()
+            except Exception as exc:
+                print(f"[ws-fallback] {type(exc).__name__}: {exc}")
+            wallclock.sleep(30)
+    finally:
+        if prev is None:
+            os.environ.pop("SOURCES", None)
+        else:
+            os.environ["SOURCES"] = prev
+
+
+def run_ws() -> None:
+    """Tradier websocket -> real-time price; bands from 5m REST refreshed every
+    BANDS_REFRESH_SEC; tick-by-tick z with hysteresis; reconnect w/ backoff;
+    Yahoo polling fallback after WS_MAX_FAILS consecutive failures."""
+    import websocket  # lazy: only the ws mode needs the dependency
+
+    symbols = [s.strip() for s in _env("SYMBOLS", "MES=F,MNQ=F").split(",") if s.strip()]
+    band_tf = _env("BAND_TF", "5m")
+    threshold = float(_env("SD_THRESHOLD", "2.8"))
+    rearm = float(_env("REARM_SD", "2.0"))
+    band_sd = float(_env("BAND_SD", "3.0"))
+    warmup_min = float(_env("WARMUP_MIN", "0"))
+    anchor = _env("VWAP_ANCHOR", "rth").lower()
+    min_bars = int(_env("MIN_BARS", "3"))
+    refresh_sec = int(_env("BANDS_REFRESH_SEC", "60"))
+    max_fails = int(_env("WS_MAX_FAILS", "4"))
+    fallback_min = int(_env("WS_FALLBACK_MIN", "5"))
+    stale_conn_sec = int(_env("WS_STALE_CONN_SEC", "90"))
+    token = _env("TRADIER_TOKEN", "")
+    tg_token, chat_id = _env("TELEGRAM_BOT_TOKEN", ""), _env("TELEGRAM_CHAT_ID", "")
+    dry = _env("DRY_RUN", "0") == "1"
+    if not token:
+        raise SystemExit("--ws needs TRADIER_TOKEN")
+    if not dry and (not tg_token or not chat_id):
+        raise SystemExit("TELEGRAM_BOT_TOKEN/CHAT_ID required (or DRY_RUN=1)")
+
+    etf_of = {s: TRADIER_MAP.get(s, s) for s in symbols}
+    fut_of = {etf: s for s, etf in etf_of.items()}
+    bands = {s: None for s in symbols}
+    armed = {s: True for s in symbols}
+    print(f"[ws] mode: {symbols} via {sorted(set(etf_of.values()))}, bands={band_tf} "
+          f"anchor={anchor} thr={threshold} rearm={rearm} warmup={warmup_min}m")
+
+    fails = 0
+    while True:
+        ws = None
+        try:
+            sid = _tradier_stream_session(token)
+            ws = websocket.create_connection(TRADIER_WS_URL, timeout=20)
+            ws.settimeout(20)
+            etfs = sorted(set(etf_of.values()))
+            ws.send(json.dumps({"symbols": etfs, "sessionid": sid,
+                                "linebreak": True, "filter": ["trade"]}))
+            print(f"[ws] connected, streaming {etfs}")
+            fails = 0
+            for s in symbols:
+                bands[s] = _refresh_bands(s, band_tf, anchor, min_bars)
+            last_refresh = wallclock.time()
+            last_msg = wallclock.time()
+
+            while True:
+                try:
+                    msg = ws.recv()
+                except websocket.WebSocketTimeoutException:
+                    if wallclock.time() - last_msg > stale_conn_sec:
+                        raise ConnectionError(f"no messages for {stale_conn_sec}s")
+                    continue
+                last_msg = wallclock.time()
+                if not msg or not msg.strip():
+                    continue
+                try:
+                    ev = json.loads(msg)
+                except ValueError:
+                    continue
+                if ev.get("type") != "trade":
+                    continue
+                etf = ev.get("symbol")
+                sym = fut_of.get(etf)
+                if sym is None:
+                    continue
+                try:
+                    price = float(ev["price"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+
+                now = wallclock.time()
+                if now - last_refresh >= refresh_sec:
+                    for s in symbols:
+                        nb = _refresh_bands(s, band_tf, anchor, min_bars)
+                        if nb:
+                            bands[s] = nb
+                    last_refresh = now
+
+                action, armed[sym], z = _eval_tick(
+                    price, bands.get(sym), armed[sym], threshold, rearm,
+                    warmup_min, datetime.now(timezone.utc).timestamp())
+                if action == "alert":
+                    rt = dict(bands[sym]); rt["price"] = price; rt["z"] = z
+                    text = format_alert(sym, rt, int(now), band_sd, anchor,
+                                        f"{band_tf}/realtime", "tradier-ws",
+                                        _meta(proxy=etf, anchor_override="rth"))
+                    if dry:
+                        print("--- ALERT (dry-run) ---\n" + text + "\n--------------------")
+                    else:
+                        try:
+                            send_telegram(tg_token, chat_id, text)
+                        except Exception as exc:
+                            print(f"[ws] telegram send failed: {exc}")
+                    print(f"[ws] ALERT {sym} z={z:+.2f} @ {price:.2f}")
+                elif action == "rearm":
+                    print(f"[ws] re-armed {sym} (z={z:+.2f})")
+        except Exception as exc:
+            fails += 1
+            print(f"[ws] connection lost ({type(exc).__name__}: {exc}); "
+                  f"fail {fails}/{max_fails}")
+            if ws is not None:
+                try:
+                    ws.close()
+                except Exception:
+                    pass
+            if fails >= max_fails:
+                _poll_fallback(fallback_min)
+                fails = 0
+            else:
+                wallclock.sleep(min(2 ** fails, 30))
+
+
 if __name__ == "__main__":
     import sys
-    if "--loop" in sys.argv:
+    if "--ws" in sys.argv:
+        run_ws()
+    elif "--loop" in sys.argv:
         i = sys.argv.index("--loop")
         secs = int(sys.argv[i + 1]) if i + 1 < len(sys.argv) and sys.argv[i + 1].isdigit() else 60
         run_loop(secs)
