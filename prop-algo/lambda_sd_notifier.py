@@ -83,12 +83,13 @@ DEPLOY ON AWS LAMBDA
       WARMUP_MIN           default "0"    suppress alerts for N minutes after the
                              anchor (use ~30 with VWAP_ANCHOR=rth so the opening
                              bars' tiny-sample bands don't fire false 3-SD signals)
-      MAX_BAR_AGE_MIN      default "0"    skip if the latest bar is older than this
-                             many minutes -- guards against stale data (e.g. a
-                             real-time source going quiet, or an RTH-only source
-                             like tradier being polled overnight). NOTE Yahoo's
-                             futures feed is ~10 min delayed, so keep this >~20
-                             if Yahoo is in your SOURCES.
+      MAX_BAR_AGE_MIN      default "0"    staleness guard (0=off). The limit is
+                             2*interval + MAX_BAR_AGE_MIN, so it scales per
+                             timeframe automatically; MAX_BAR_AGE_MIN is just the
+                             extra grace for feed delay (~12 covers Yahoo's ~10
+                             min lag). Catches stale data: a real-time source
+                             going quiet, or an RTH-only source (tradier) polled
+                             overnight serving the prior 16:00 close.
       USE_LAST_CLOSED_BAR  default "1"    ignore the still-forming current bar
   * Give the function ~128MB and a 30s timeout; outbound internet (default
     Lambda networking, or a NAT gateway if you place it in a VPC).
@@ -510,11 +511,18 @@ def check_symbols() -> list[dict]:
                 continue
 
             bar_time = bars[-1][0]
-            bar_age_min = (datetime.now(timezone.utc).timestamp() - bar_time) / 60.0
-            if max_bar_age and bar_age_min > max_bar_age:
-                print(f"[{tag}] src={source} latest bar is {bar_age_min:.0f} min old "
-                      f"(> {max_bar_age}); stale, skip")
-                continue
+            if max_bar_age:
+                # bar_time is the bar's START; the latest *complete* bar (we drop
+                # the forming one) can legitimately be up to ~2 intervals old, so
+                # the limit must scale with the interval. max_bar_age is the extra
+                # grace beyond that for feed delay (~12 covers Yahoo's 10-min lag).
+                age_sec = datetime.now(timezone.utc).timestamp() - bar_time
+                limit_sec = 2 * parse_interval_seconds(interval) + max_bar_age * 60
+                if age_sec > limit_sec:
+                    print(f"[{tag}] src={source} latest bar {age_sec / 60:.0f} min old "
+                          f"(> 2x{interval}+{max_bar_age}m = {limit_sec / 60:.0f}m); "
+                          f"stale, skip")
+                    continue
             elapsed_min = (bar_time - stat["session_start"]) / 60.0
             if elapsed_min < warmup_min:
                 print(f"[{tag}] src={source} warming up "
