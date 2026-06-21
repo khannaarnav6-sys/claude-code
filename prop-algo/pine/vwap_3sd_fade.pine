@@ -117,5 +117,5 @@ plotshape(goLong,  "Long",  shape.triangleup,   location.belowbar, color.green, 
 plotshape(goShort, "Short", shape.triangledown, location.abovebar, color.red,   size=size.small)
 
 // ---------------- Alerts (optional, for TradingView-native use) ----------------
-alertcondition(goLong,  "VWAP fade LONG",  "LONG fade at -{{plot_0}} band")
-alertcondition(goShort, "VWAP fade SHORT", "SHORT fade at +band")
+alertcondition(goLong,  "VWAP fade LONG",  "VWAP fade LONG on {{ticker}} @ {{close}}")
+alertcondition(goShort, "VWAP fade SHORT", "VWAP fade SHORT on {{ticker}} @ {{close}}")
