@@ -1,0 +1,121 @@
+//@version=5
+// VWAP 3-SD Mean-Reversion Fade (RTH) — companion to the Python notifier.
+//
+// Logic (matches the live notifier, on real chart data):
+//   * Session-anchored VWAP at the RTH open (09:30 ET), with volume-weighted
+//     standard-deviation bands (same math as ta.vwap's stdev bands).
+//   * FADE: short when price breaks +entrySD, long when it breaks -entrySD.
+//   * Stop at stopSD, take-profit at tpSD  -> levels LOCKED at entry (fixed
+//     prices = defined risk; a trend day stops you out instead of the band
+//     trailing away from you).
+//   * News-wick / volatility filter: skip the entry if the breakout bar is an
+//     abnormal range or volume spike (the bars that don't cleanly revert).
+//   * Time logic = notifier: VWAP resets 09:30 ET, no entries until 09:45
+//     (warm-up), no NEW entries after 15:30 ET, flat by flattenTime.
+//
+// Put it on your MNQ or MES chart (needs a symbol with volume). It's a
+// strategy() so you can backtest the real edge before trusting it.
+
+strategy("VWAP 3SD Fade — RTH", overlay=true,
+     pyramiding=0, initial_capital=50000,
+     default_qty_type=strategy.fixed, default_qty_value=1,
+     process_orders_on_close=true,
+     commission_type=strategy.commission.cash_per_contract, commission_value=0.62,
+     slippage=1)
+
+// ---------------- Inputs ----------------
+src      = input.source(hlc3,  "VWAP source")
+entrySD  = input.float(2.8,    "Entry  (SD from VWAP)", step=0.1)
+stopSD   = input.float(3.3,    "Stop   (SD from VWAP)", step=0.1)
+tpSD     = input.float(2.2,    "Target (SD from VWAP)", step=0.1)
+minBars  = input.int(3,        "Min bars since 09:30 before trading", minval=1)
+
+grpT     = "Time (ET)"
+tz       = "America/New_York"
+openHHMM = input.int(930,  "RTH open / VWAP anchor (HHMM)", group=grpT)
+startHHMM= input.int(945,  "First entry allowed (HHMM)",    group=grpT)
+lastHHMM = input.int(1530, "Last entry (HHMM)",             group=grpT)
+flatHHMM = input.int(1555, "Flatten all (HHMM)",            group=grpT)
+
+grpV     = "News-wick / volatility filter"
+atrLen   = input.int(14,   "ATR length", group=grpV)
+maxBarATR= input.float(2.0,"Skip if breakout bar range > x ATR", step=0.1, group=grpV)
+useVol   = input.bool(true,"Also use volume-spike filter", group=grpV)
+volLen   = input.int(20,   "Volume average length", group=grpV)
+volMult  = input.float(3.0,"Skip if breakout bar vol > x avg", step=0.1, group=grpV)
+
+// ---------------- Time helpers (ET) ----------------
+toMin(hhmm) => int(hhmm / 100) * 60 + (hhmm % 100)
+nowMin   = hour(time, tz) * 60 + minute(time, tz)
+inRTH    = nowMin >= toMin(openHHMM) and nowMin < toMin(1600)
+anchor   = inRTH and not nz(inRTH[1], false)          // first RTH bar of the day
+canEnter = nowMin >= toMin(startHHMM) and nowMin < toMin(lastHHMM) and inRTH
+doFlat   = nowMin >= toMin(flatHHMM)
+
+// bars elapsed since the 09:30 anchor (so SD is meaningful before we trade)
+var int barsIn = 0
+barsIn := anchor ? 1 : (inRTH ? barsIn + 1 : barsIn)
+
+// ---------------- VWAP + SD bands ----------------
+[vwap, up1, _lo1] = ta.vwap(src, anchor, 1.0)         // 1-sigma band
+sd = up1 - vwap                                        // volume-weighted stdev
+z  = sd > 0 ? (close - vwap) / sd : 0.0
+
+upEntry = vwap + entrySD * sd
+loEntry = vwap - entrySD * sd
+upTP    = vwap + tpSD    * sd
+loTP    = vwap - tpSD    * sd
+upStop  = vwap + stopSD  * sd
+loStop  = vwap - stopSD  * sd
+
+// ---------------- News-wick / volatility filter ----------------
+atr      = ta.atr(atrLen)
+avgVol   = ta.sma(volume, volLen)
+wickBar  = not na(atr) and (high - low) > maxBarATR * atr
+volSpike = useVol and not na(avgVol) and avgVol > 0 and volume > volMult * avgVol
+calm     = not wickBar and not volSpike
+
+// ---------------- Entries (fade, one per crossing) ----------------
+ready     = sd > 0 and barsIn >= minBars and canEnter and calm
+crossUp   = ta.crossover(z,  entrySD)                  // broke +entrySD -> short
+crossDn   = ta.crossunder(z, -entrySD)                 // broke -entrySD -> long
+goShort   = ready and crossUp  and strategy.position_size == 0
+goLong    = ready and crossDn  and strategy.position_size == 0
+
+var float stopPx = na
+var float tpPx   = na
+
+if goLong
+    strategy.entry("Long", strategy.long)
+    stopPx := loStop
+    tpPx   := loTP
+if goShort
+    strategy.entry("Short", strategy.short)
+    stopPx := upStop
+    tpPx   := upTP
+
+// ---------------- Exits: fixed stop/TP locked at entry ----------------
+if strategy.position_size > 0
+    strategy.exit("L x", from_entry="Long",  stop=stopPx, limit=tpPx)
+if strategy.position_size < 0
+    strategy.exit("S x", from_entry="Short", stop=stopPx, limit=tpPx)
+
+// flatten before the close (no overnight hold)
+if doFlat and strategy.position_size != 0
+    strategy.close_all(comment="EOD flat")
+
+// ---------------- Plots ----------------
+plot(vwap,    "VWAP",      color.new(color.blue, 0))
+plot(upEntry, "+entry SD", color.new(color.orange, 0))
+plot(loEntry, "-entry SD", color.new(color.orange, 0))
+plot(upStop,  "+stop SD",  color.new(color.red, 40))
+plot(loStop,  "-stop SD",  color.new(color.red, 40))
+plot(upTP,    "+TP SD",    color.new(color.green, 40))
+plot(loTP,    "-TP SD",    color.new(color.green, 40))
+bgcolor(canEnter ? na : color.new(color.gray, 92), title="Outside trade window")
+plotshape(goLong,  "Long",  shape.triangleup,   location.belowbar, color.green, size=size.small)
+plotshape(goShort, "Short", shape.triangledown, location.abovebar, color.red,   size=size.small)
+
+// ---------------- Alerts (optional, for TradingView-native use) ----------------
+alertcondition(goLong,  "VWAP fade LONG",  "LONG fade at -{{plot_0}} band")
+alertcondition(goShort, "VWAP fade SHORT", "SHORT fade at +band")
