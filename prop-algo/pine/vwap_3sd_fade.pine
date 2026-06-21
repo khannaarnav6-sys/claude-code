@@ -119,3 +119,65 @@ plotshape(goShort, "Short", shape.triangledown, location.abovebar, color.red,   
 // ---------------- Alerts (optional, for TradingView-native use) ----------------
 alertcondition(goLong,  "VWAP fade LONG",  "VWAP fade LONG on {{ticker}} @ {{close}}")
 alertcondition(goShort, "VWAP fade SHORT", "VWAP fade SHORT on {{ticker}} @ {{close}}")
+
+// ===================== LOSER BREAKDOWN (on-chart table) =====================
+// Categorizes every closed trade so you can see where the losers come from:
+// by side (long/short), by entry time-of-day, and stop-out vs EOD-flat.
+var int   lWin=0
+var int   lLoss=0
+var float lNet=0.0
+var int   sWin=0
+var int   sLoss=0
+var float sNet=0.0
+var int   lossOpen=0     // 09:30-10:30  (opening drive)
+var int   lossMid1=0     // 10:30-12:00
+var int   lossMid2=0     // 12:00-14:00
+var int   lossPM=0       // 14:00-15:30
+var int   lossStop=0     // exited at the 3.3 SD stop
+var int   lossFlat=0     // still red at the EOD flatten
+var int   seen=0
+
+if strategy.closedtrades > seen
+    for i = seen to strategy.closedtrades - 1
+        p  = strategy.closedtrades.profit(i)
+        sz = strategy.closedtrades.size(i)
+        em = hour(strategy.closedtrades.entry_time(i), tz) * 60 + minute(strategy.closedtrades.entry_time(i), tz)
+        xm = hour(strategy.closedtrades.exit_time(i),  tz) * 60 + minute(strategy.closedtrades.exit_time(i),  tz)
+        if sz > 0
+            lNet += p
+            lWin := p >= 0 ? lWin + 1 : lWin
+            lLoss := p < 0 ? lLoss + 1 : lLoss
+        else
+            sNet += p
+            sWin := p >= 0 ? sWin + 1 : sWin
+            sLoss := p < 0 ? sLoss + 1 : sLoss
+        if p < 0
+            lossOpen := em < toMin(1030) ? lossOpen + 1 : lossOpen
+            lossMid1 := (em >= toMin(1030) and em < toMin(1200)) ? lossMid1 + 1 : lossMid1
+            lossMid2 := (em >= toMin(1200) and em < toMin(1400)) ? lossMid2 + 1 : lossMid2
+            lossPM   := em >= toMin(1400) ? lossPM + 1 : lossPM
+            lossFlat := xm >= toMin(flatHHMM) ? lossFlat + 1 : lossFlat
+            lossStop := xm <  toMin(flatHHMM) ? lossStop + 1 : lossStop
+    seen := strategy.closedtrades
+
+money(x) => "$" + str.tostring(math.round(x))
+var table tb = table.new(position.top_right, 2, 9, border_width=1, frame_width=1, frame_color=color.gray)
+if barstate.islast
+    table.cell(tb, 0, 0, "LOSER BREAKDOWN", bgcolor=color.new(color.gray, 0), text_color=color.white)
+    table.cell(tb, 1, 0, "", bgcolor=color.new(color.gray, 0))
+    table.cell(tb, 0, 1, "Long  W/L (net)", text_halign=text.align_left)
+    table.cell(tb, 1, 1, str.tostring(lWin) + "/" + str.tostring(lLoss) + "  " + money(lNet))
+    table.cell(tb, 0, 2, "Short W/L (net)", text_halign=text.align_left)
+    table.cell(tb, 1, 2, str.tostring(sWin) + "/" + str.tostring(sLoss) + "  " + money(sNet))
+    table.cell(tb, 0, 3, "Losers 09:30-10:30", text_halign=text.align_left)
+    table.cell(tb, 1, 3, str.tostring(lossOpen))
+    table.cell(tb, 0, 4, "Losers 10:30-12:00", text_halign=text.align_left)
+    table.cell(tb, 1, 4, str.tostring(lossMid1))
+    table.cell(tb, 0, 5, "Losers 12:00-14:00", text_halign=text.align_left)
+    table.cell(tb, 1, 5, str.tostring(lossMid2))
+    table.cell(tb, 0, 6, "Losers 14:00-15:30", text_halign=text.align_left)
+    table.cell(tb, 1, 6, str.tostring(lossPM))
+    table.cell(tb, 0, 7, "Losers: stop-out", text_halign=text.align_left)
+    table.cell(tb, 1, 7, str.tostring(lossStop))
+    table.cell(tb, 0, 8, "Losers: EOD flat", text_halign=text.align_left)
+    table.cell(tb, 1, 8, str.tostring(lossFlat))
