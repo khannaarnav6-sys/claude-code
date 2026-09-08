@@ -436,6 +436,78 @@
       }
     }
   },
+  "holdout": [
+    {
+      "model": "gap: base rules",
+      "sessions": 262,
+      "setups": 240,
+      "trades": 170,
+      "win_rate": 0.341,
+      "expectancy_r": 0.004,
+      "ci_low": -0.211,
+      "ci_high": 0.22,
+      "total_r": 0.67,
+      "profit_factor": 1.006,
+      "max_dd_r": 15.94,
+      "t_stat": 0.04
+    },
+    {
+      "model": "gap: prior-day bias",
+      "sessions": 262,
+      "setups": 157,
+      "trades": 111,
+      "win_rate": 0.459,
+      "expectancy_r": 0.363,
+      "ci_low": 0.088,
+      "ci_high": 0.638,
+      "total_r": 40.28,
+      "profit_factor": 1.651,
+      "max_dd_r": 9.41,
+      "t_stat": 2.52
+    },
+    {
+      "model": "ict: full model",
+      "sessions": 262,
+      "setups": 73,
+      "trades": 44,
+      "win_rate": 0.159,
+      "expectancy_r": -0.347,
+      "ci_low": -0.765,
+      "ci_high": 0.157,
+      "total_r": -15.26,
+      "profit_factor": 0.592,
+      "max_dd_r": 22.24,
+      "t_stat": -1.44
+    },
+    {
+      "model": "ict: trimmed",
+      "sessions": 262,
+      "setups": 101,
+      "trades": 71,
+      "win_rate": 0.183,
+      "expectancy_r": -0.267,
+      "ci_low": -0.635,
+      "ci_high": 0.152,
+      "total_r": -18.93,
+      "profit_factor": 0.677,
+      "max_dd_r": 28.06,
+      "t_stat": -1.32
+    },
+    {
+      "model": "ict: target fixed 2R",
+      "sessions": 262,
+      "setups": 110,
+      "trades": 66,
+      "win_rate": 0.273,
+      "expectancy_r": -0.195,
+      "ci_low": -0.502,
+      "ci_high": 0.132,
+      "total_r": -12.84,
+      "profit_factor": 0.733,
+      "max_dd_r": 22.88,
+      "t_stat": -1.18
+    }
+  ],
   "ict": {
     "config": "ict/fvg target=asia mss fvg d/p",
     "per_market": [

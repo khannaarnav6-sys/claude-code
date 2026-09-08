@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 
 from .backtest import ExecutionConfig, rth_sessions, run
-from .data import Contract, median_session_range
+from .data import ET, Contract, median_session_range
 from .ict import ICTConfig, run_ict
 from .ict import scaled_for as scale_ict
 from .metrics import summarize
@@ -30,6 +30,36 @@ from .strategy import StrategyConfig
 # A CFD has no contract size; NQ's specs are borrowed so the tick rounding and
 # the cost model match the in-sample run. Dollar figures from this are notional.
 PROXY = Contract("USATECHIDXUSD", tick_size=0.25, point_value=20.0, commission_round_turn=4.50)
+
+
+def load_cached(
+    instrument: str = "USATECHIDXUSD", before: str | None = "2026-06-27"
+) -> pd.DataFrame:
+    """Every day already pulled into the cache, as one frame.
+
+    `before` cuts the frame off ahead of the in-sample window so a holdout run
+    cannot accidentally include the sessions the rules were built on.
+    """
+    import glob
+
+    from .data import DATA_DIR
+
+    frames = []
+    for path in sorted(glob.glob(str(DATA_DIR / "dukascopy" / instrument / "*.csv"))):
+        day = pd.read_csv(path, index_col="timestamp", parse_dates=["timestamp"])
+        if day.empty:
+            continue
+        if day.index.tz is None:
+            day.index = day.index.tz_localize("UTC")
+        frames.append(day.tz_convert(ET))
+    if not frames:
+        return pd.DataFrame()
+    bars = pd.concat(frames).sort_index()
+    bars = bars[~bars.index.duplicated(keep="first")]
+    bars.index.name = "timestamp"
+    if before:
+        bars = bars[bars.index < pd.Timestamp(before, tz=ET)]
+    return bars
 
 
 def scale_gap_config(config: StrategyConfig, session_range: float) -> StrategyConfig:

@@ -12,9 +12,12 @@ around it — control permutations, a parameter grid, a bar-resolution test, a
 slippage ladder and a run across four index futures — that decide whether the
 equity curve means anything.
 
-**The short answer: the NQ result does not replicate.** The same rules on ES, YM
-and RTY return +0.24R per trade pooled over 130 trades (t = 1.81), against
-+0.65R on NQ alone. NQ is the best of four, which is what luck looks like.
+**The short answer, after a 262-session out-of-sample test: almost none of it
+survives.** The base gap rules earn exactly nothing (+0.004R over 170 trades).
+The elaborate ICT model — the best thing in sample at +1.59R — *loses* money
+out of sample at −0.35R. One filter survives: taking only gaps that agree with
+yesterday's close returns **+0.36R over 111 trades (t = 2.52)**, and it is the
+same filter that was positive in all four index futures.
 
 ## The rules
 
@@ -215,6 +218,65 @@ liquidity target fires less often and produces far more variable R. "Nearest
 pool" is indistinguishable from Asia (+0.51R). So the Asia draw is defensible
 and it is *not* demonstrably better than simply targeting 2R.
 
+
+## The holdout: 262 sessions, and what it destroyed
+
+Everything above rests on 49 sessions, which is why it kept producing numbers
+too good to believe. Yahoo serves only 60 days of 5-minute bars, so the holdout
+comes from Dukascopy's public tick feed — free, no key, years of history —
+decoded into 5-minute bars over **2025-06-02 to 2026-06-26**: 262 sessions,
+ending three days before the in-sample window begins. No overlap, nothing
+refitted, a different data vendor.
+
+**The proxy was validated first.** Dukascopy serves a Nasdaq 100 index CFD, not
+the NQ contract, so before trusting a single holdout number both instruments
+were run over 28 identical sessions. They agree on all five models — same signs,
+similar magnitudes, near-identical trade counts (15/14, 11/10, 6/6, 11/9, 5/6).
+The proxy finds the same setups on the same days.
+
+| Model | Trades | Win rate | Expectancy | 95% CI | t |
+|---|---|---|---|---|---|
+| **Gap + prior-day bias** | 111 | 46% | **+0.36R** | [+0.09, +0.64] | **2.52** |
+| Gap, base rules | 170 | 34% | +0.00R | [−0.21, +0.22] | 0.04 |
+| ICT, target fixed 2R | 66 | 27% | −0.20R | [−0.50, +0.13] | −1.18 |
+| ICT, trimmed | 71 | 18% | −0.27R | [−0.64, +0.15] | −1.32 |
+| **ICT, full model** | 44 | 16% | **−0.35R** | [−0.77, +0.16] | −1.44 |
+
+Three conclusions, and they are the ones that matter:
+
+**The base gap rules are worth exactly zero.** +0.004R over 170 trades. The
++0.65R measured on 49 NQ sessions was noise, as the cross-market check already
+suspected.
+
+**Complexity actively hurt.** The full ICT model — sweep, structure shift,
+imbalance, discount, Asia-range draw — is the *worst* performer out of sample.
+It won 16% of its trades against 62% in sample, and it lost in four quarters of
+five. Every confluence added in-sample expectancy and subtracted out-of-sample
+survival, which is what overfitting looks like from the inside.
+
+**One thing lived.** Trading gaps only in the direction of yesterday's close
+returns +0.36R over 111 trades with a confidence interval that excludes zero, a
+1.65 profit factor, and both split-halves positive (+0.46R then +0.27R). It is
+also the filter that was positive in all four index futures. Two independent
+confirmations is the strongest evidence in this repository.
+
+It is still not a finished system. Its randomised-direction control comes in at
+p = 0.100 — the direction call is not clearly better than a coin flip on the
+same setups — its worst drawdown is 9.4R, and two of five quarters are slightly
+negative. That is a candidate worth forward-testing, not a bot worth funding.
+
+### Why the in-sample results were so misleading
+
+| Rule set | 49 NQ sessions | 262-session holdout |
+|---|---|---|
+| ICT, full model | +1.59R | **−0.35R** |
+| Gap, base rules | +0.65R | **+0.00R** |
+| Gap + prior-day bias | +0.66R | **+0.36R** |
+
+The ranking inverted almost perfectly. The most complex model looked twice as
+good as anything else in sample and was the only one that lost money out of it.
+The plainest filter looked unremarkable and was the only survivor.
+
 ## The cross-market check
 
 This is the most informative test in the project and the one that should be read
@@ -351,7 +413,7 @@ python3 run_backtest.py              # full report
 python3 run_backtest.py --refresh    # re-download bars first
 python3 run_backtest.py --quick      # skip the 500-draw control permutations
 python3 run_backtest.py --target-r 3 --entry-style proximal
-python3 -m pytest tests -q           # 98 tests
+python3 -m pytest tests -q           # 113 tests
 ```
 
 Writes `results/trades_baseline.csv` and `results/trades_sweep.csv` (the trade
@@ -369,6 +431,8 @@ ledgers), `results/sweep.csv` (the parameter grid) and `results/summary.json`.
 | `gapstrat/liquidity.py` | Session ranges, weekly gaps, HTF imbalances |
 | `gapstrat/ict.py` | The full A+ model and its ablation |
 | `gapstrat/crossmarket.py` | One rule set across ES, YM and RTY |
+| `gapstrat/dukascopy.py` | Long-history bars from a public tick feed |
+| `gapstrat/holdout.py` | The out-of-sample run, with nothing refitted |
 | `gapstrat/backtest.py` | Bar-by-bar fill simulation |
 | `gapstrat/metrics.py` | Statistics, bootstrap intervals |
 | `gapstrat/controls.py` | Permutation nulls the strategy has to beat |

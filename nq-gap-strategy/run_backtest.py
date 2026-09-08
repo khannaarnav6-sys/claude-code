@@ -26,6 +26,7 @@ from gapstrat.crossmarket import format_study, study
 from gapstrat.data import CONTRACTS, median_session_range
 from gapstrat.ict import ICTConfig, run_ict
 from gapstrat.ict import describe as describe_ict
+from gapstrat.holdout import PROXY, by_period, evaluate, load_cached
 from gapstrat.data import NQ
 from gapstrat.metrics import bootstrap_ci, equity_curve, format_stats, summarize
 from gapstrat.strategy import StrategyConfig, describe
@@ -407,6 +408,26 @@ def main() -> None:
         print(format_study(table, pooled, f"--- {label} ---"))
         print()
 
+    heading("OUT-OF-SAMPLE HOLDOUT  (13 months, independent source)")
+    holdout_bars = load_cached()
+    holdout_table = pd.DataFrame()
+    if holdout_bars.empty:
+        print("no cached Dukascopy data; run gapstrat.dukascopy.prefetch first")
+    else:
+        holdout_days = rth_sessions(holdout_bars)
+        print(f"Nasdaq 100 CFD, {len(holdout_days)} sessions "
+              f"{holdout_days[0]} -> {holdout_days[-1]}, entirely before the in-sample window.")
+        print("Same rules, nothing refitted; only each market's median session range is read.\n")
+        holdout_table, holdout_results = evaluate(holdout_bars, contract=PROXY, days=holdout_days)
+        print(holdout_table.to_string(index=False))
+        holdout_table.to_csv(RESULTS / "holdout.csv", index=False)
+        best = holdout_table.sort_values("expectancy_r", ascending=False).iloc[0]
+        quarters = by_period(holdout_results[best["model"]])
+        if not quarters.empty:
+            quarters.index = [str(i.date()) for i in quarters.index]
+            print(f"\nquarter by quarter, {best['model']}:")
+            print(quarters.to_string())
+
     heading("SLIPPAGE SENSITIVITY")
     slip_table = slippage_sensitivity(bars_5m, bars_5m, days_5m, base)
     print(slip_table.to_string(index=False))
@@ -448,6 +469,7 @@ def main() -> None:
         "baseline": stats.to_dict(),
         "bias_comparison": bias_table.to_dict(orient="records"),
         "cross_market": cross_tables,
+        "holdout": holdout_table.to_dict(orient="records") if not holdout_table.empty else [],
         "ict": {
             "config": describe_ict(ICTConfig()),
             "per_market": ict_markets.to_dict(orient="records"),
