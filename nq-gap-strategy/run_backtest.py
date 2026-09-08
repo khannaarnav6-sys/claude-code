@@ -238,6 +238,7 @@ def main() -> None:
                 "actual_r": round(c.actual, 4),
                 "percentile": round(c.percentile_of_actual, 1),
                 "p_value": round(c.p_value, 4),
+                "distribution": [round(float(v), 4) for v in c.expectancies],
             }
             for c in controls
         ],
