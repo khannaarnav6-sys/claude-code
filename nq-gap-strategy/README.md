@@ -3,11 +3,15 @@
 Tests one idea on Nasdaq 100 futures: **wait for the New York open, take the
 first unmitigated gap that forms, and trade it with a defined stop.**
 
+It also tests two ways of sharpening that: filtering gaps by the session's
+**bias**, and a separate **sweep-and-reclaim** setup that anchors the entry and
+the stop to the same reversal.
+
 The point of this project is not the equity curve. It is the set of checks
-around it — control permutations, a parameter sweep, a bar-resolution test and
-a slippage ladder — that decide whether the equity curve means anything. On
-this sample the answer is "probably something, but the sample is too small to
-bet on."
+around it — control permutations, a parameter grid, a bar-resolution test and a
+slippage ladder — that decide whether the equity curve means anything. On this
+sample the answer is "probably something in the base rules, nothing yet in the
+setup that looks best."
 
 ## The rules
 
@@ -55,11 +59,11 @@ of the market — averages +0.22R. The real rule beat 99% of those runs
 session averages +0.32R; the first gap beat 94% of those runs (p = 0.062).
 Suggestive, not significant.
 
-**The shape of the edge is consistent.** 18 of 25 sweep variants are positive,
-median +0.36R. Every limit-back-into-the-gap variant makes money; every
-stop-entry breakout variant and the fade loses. A single lucky cell would not
-look like that — but the sweep also means the *best* cell (+0.84R at a 10:30
-cutoff) is not to be trusted.
+**The shape of the edge is consistent.** 18 of 25 variants in the parameter
+grid are positive, median +0.36R. Every limit-back-into-the-gap variant makes
+money; every stop-entry breakout variant and the fade loses. A single lucky cell
+would not look like that — but a 25-cell grid also means the *best* cell (+0.84R
+at a 10:30 cutoff) is not to be trusted.
 
 **Costs are not the problem.** Stops average ~15 points, so quadrupling
 slippage to 4 ticks a side moves expectancy from +0.66R to +0.62R.
@@ -71,13 +75,66 @@ the simulator takes the stop; on 5-minute bars that happened to a third of all
 trades. The headline +0.65R is therefore a *pessimistic* bound, not an
 optimistic one.
 
-### Why not to trade this yet
+## Session bias
+
+The base rules take the first gap and trade whichever way it points. Adding a
+bias filter asks the question a discretionary trader asks first — *which side am
+I looking for today?* — and skips gaps that argue against it. Every method is
+evaluated only from bars that had already printed when the order would go in.
+
+| Bias | Trades | Win rate | Expectancy | 95% CI |
+|---|---|---|---|---|
+| Opening-range break | 21 | 62% | **+0.86R** | [+0.15, +1.44] |
+| Prior day's close | 18 | 56% | +0.66R | [−0.01, +1.33] |
+| None (base rules) | 29 | 55% | +0.65R | [+0.12, +1.17] |
+| Overnight-range break | 15 | 47% | +0.39R | [−0.41, +1.20] |
+| Sweep-and-reclaim | 21 | 38% | +0.19R | [−0.44, +0.82] |
+
+The most recent break of the first 15 minutes' range is the only filter that
+clearly beats taking every gap, and it costs 8 of 29 trades to get there. That
+is the trade-off every filter makes: a better average on a thinner sample is not
+automatically a better strategy, and the interval barely narrows.
+
+### The structural stop makes things worse
+
+Placing the stop beyond the recent swing low instead of the gap's far edge —
+the placement in the chart this was modelled on — loses money in **nine of ten**
+bias/stop combinations, taking the base rules from +0.65R to −0.32R.
+
+The reason is geometry, not stop placement as such. A gap entry fires *after* a
+displacement, so the entry sits high in the move while the structural stop stays
+at the pre-move low: average risk goes from 15 to 72 points while the room left
+above is unchanged. A 2R target then needs a 144-point move after the move has
+already happened. Capping risk at 40–55 points does not rescue it.
+
+## Sweep and reclaim
+
+Anchoring entry and stop to the *same* event fixes that geometry, and is the
+setup the chart actually shows: price runs a known low, fails to hold under it,
+and reclaims it; the entry is a limit back at the reclaimed level with the stop
+just below the wick that swept it. Both sit at the origin of the move, so risk
+is small relative to the room above.
+
+The best cell — sweeping the overnight low, entering at the level, requiring an
+imbalance on the reclaim — returns **+1.14R over 7 trades**, 71% win rate,
+26-point average risk. That is the most attractive number in this repository and
+it should be ignored, for two reasons:
+
+- **It fails its own control.** Randomising the direction on the same setups
+  averages +0.97R (p = 0.37). With seven trades and a 2R target, a coin flip
+  produces the same result.
+- **10 of 18 variants are positive**, which is what a coin flip looks like.
+
+The setup fires on 12 of 49 sessions and fills 7. Whether it works is simply not
+answerable on two months of data.
+
+### Why not to trade any of this yet
 
 - **29 trades.** The confidence interval's lower edge is +0.12R, barely above
   zero. One extra losing streak flips the conclusion.
 - **68 calendar days of a single regime.** No high-volatility stretch, no rate
   shock, no earnings-season cluster.
-- **The sweep is a multiple-comparisons machine.** 25 variants on one sample.
+- **The parameter grid is a multiple-comparisons machine.** 25 variants on one sample.
 - **Shorts are much weaker than longs** (+0.39R vs +0.93R) in a flat market,
   which the strategy's logic does not explain.
 - **Yahoo bars, not tick data.** No bid/ask, no volume profile, continuous
@@ -94,11 +151,11 @@ python3 run_backtest.py              # full report
 python3 run_backtest.py --refresh    # re-download bars first
 python3 run_backtest.py --quick      # skip the 500-draw control permutations
 python3 run_backtest.py --target-r 3 --entry-style proximal
-python3 -m pytest tests -q           # 36 tests
+python3 -m pytest tests -q           # 64 tests
 ```
 
-Writes `results/trades_baseline.csv` (the ledger), `results/sweep.csv` and
-`results/summary.json`.
+Writes `results/trades_baseline.csv` and `results/trades_sweep.csv` (the trade
+ledgers), `results/sweep.csv` (the parameter grid) and `results/summary.json`.
 
 ## Layout
 
@@ -107,6 +164,8 @@ Writes `results/trades_baseline.csv` (the ledger), `results/sweep.csv` and
 | `gapstrat/data.py` | Bar download, caching, resampling, session slicing |
 | `gapstrat/gaps.py` | Fair value gap detection and mitigation tracking |
 | `gapstrat/strategy.py` | Rules: which gap, which side, what levels |
+| `gapstrat/bias.py` | Session bias: which side to look for today |
+| `gapstrat/sweep.py` | The stop-run-and-reverse setup |
 | `gapstrat/backtest.py` | Bar-by-bar fill simulation |
 | `gapstrat/metrics.py` | Statistics, bootstrap intervals |
 | `gapstrat/controls.py` | Permutation nulls the strategy has to beat |

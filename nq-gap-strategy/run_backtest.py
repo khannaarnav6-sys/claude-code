@@ -18,12 +18,15 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from gapstrat import bias as bias_module
 from gapstrat import data
-from gapstrat.backtest import ExecutionConfig, plans_for, r_multiples, rth_sessions, run
-from gapstrat.controls import run_controls
+from gapstrat.backtest import ExecutionConfig, plans_for, r_multiples, rth_sessions, run, run_plans
+from gapstrat.controls import ControlResult, random_direction, run_controls
 from gapstrat.data import NQ
 from gapstrat.metrics import bootstrap_ci, equity_curve, format_stats, summarize
 from gapstrat.strategy import StrategyConfig, describe
+from gapstrat.sweep import SweepConfig, plan_sweep_session, run_sweep
+from gapstrat.sweep import describe as describe_sweep
 
 RESULTS = Path(__file__).resolve().parent / "results"
 SYMBOL = "NQ=F"
@@ -54,7 +57,7 @@ def sweep(signal_bars, exec_bars, days, base: StrategyConfig, execution) -> pd.D
         grid.append(replace(base, signal_cutoff=cutoff))
     for min_gap in (0.0, 10.0, 20.0):
         grid.append(replace(base, min_gap_points=min_gap))
-    grid.append(replace(base, bias="fade"))
+    grid.append(replace(base, displacement="fade"))
     grid.append(replace(base, breakeven_at_r=1.0))
 
     for cfg in grid:
@@ -77,6 +80,69 @@ def sweep(signal_bars, exec_bars, days, base: StrategyConfig, execution) -> pd.D
                 "profit_factor": stats.profit_factor,
             }
         )
+    return pd.DataFrame(rows).sort_values("expectancy_r", ascending=False)
+
+
+def bias_comparison(signal_bars, exec_bars, days, base, execution) -> pd.DataFrame:
+    """Does knowing the session's lean improve the gap trade, or just thin it out?
+
+    Filtering always removes trades, and removing trades always widens the
+    interval, so a higher expectancy on fewer trades is not automatically an
+    improvement. The trade count sits next to the expectancy for that reason.
+    """
+    rows = []
+    for method in bias_module.METHODS:
+        for stop_style in ("gap_far", "swing"):
+            cfg = replace(base, bias_method=method, stop_style=stop_style)
+            result = run(signal_bars, exec_bars, cfg, NQ, execution, days=days)
+            stats = summarize(result)
+            risks = [t.risk_points for t in result.filled]
+            rows.append(
+                {
+                    "bias": method,
+                    "stop": stop_style,
+                    "setups": stats.setups,
+                    "trades": stats.trades,
+                    "win_rate": stats.win_rate,
+                    "expectancy_r": stats.expectancy_r,
+                    "ci_low": stats.expectancy_r_ci[0],
+                    "ci_high": stats.expectancy_r_ci[1],
+                    "total_r": stats.total_r,
+                    "avg_risk_pts": round(sum(risks) / len(risks), 1) if risks else 0.0,
+                    "net_dollars": stats.net_dollars,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def sweep_setup_study(signal_bars, exec_bars, days, execution) -> pd.DataFrame:
+    """The stop-run-and-reverse setup across its own parameter grid."""
+    rows = []
+    for reference in ("overnight", "prior_day", "opening_range"):
+        for anchor in ("level", "sweep_mid", "sweep_close"):
+            for displacement in (True, False):
+                cfg = SweepConfig(
+                    reference=reference, entry_anchor=anchor, require_displacement=displacement
+                )
+                result = run_sweep(signal_bars, exec_bars, cfg, NQ, execution, days=days)
+                stats = summarize(result)
+                risks = [t.risk_points for t in result.filled]
+                rows.append(
+                    {
+                        "reference": reference,
+                        "entry_anchor": anchor,
+                        "needs_displacement": displacement,
+                        "setups": stats.setups,
+                        "trades": stats.trades,
+                        "win_rate": stats.win_rate,
+                        "expectancy_r": stats.expectancy_r,
+                        "ci_low": stats.expectancy_r_ci[0],
+                        "ci_high": stats.expectancy_r_ci[1],
+                        "total_r": stats.total_r,
+                        "avg_risk_pts": round(sum(risks) / len(risks), 1) if risks else 0.0,
+                        "net_dollars": stats.net_dollars,
+                    }
+                )
     return pd.DataFrame(rows).sort_values("expectancy_r", ascending=False)
 
 
@@ -187,6 +253,50 @@ def main() -> None:
         print(f"\n{label} ({len(overlap)} sessions)")
         print(format_stats(sub_stats))
 
+    heading("SESSION BIAS  (does knowing the day's lean help?)")
+    bias_table = bias_comparison(bars_5m, bars_5m, days_5m, base, execution)
+    print(bias_table.to_string(index=False))
+    print("\nFewer trades is the cost of every filter here: a higher expectancy on")
+    print("half the sample is not automatically a better strategy.")
+
+    heading("SWEEP AND RECLAIM  (stop-run, reversal, limit back at the level)")
+    sweep_table = sweep_setup_study(bars_5m, bars_5m, days_5m, execution)
+    print(sweep_table.to_string(index=False))
+    best = sweep_table.iloc[0]
+    sweep_best = SweepConfig(
+        reference=best["reference"],
+        entry_anchor=best["entry_anchor"],
+        require_displacement=bool(best["needs_displacement"]),
+    )
+    sweep_result = run_sweep(bars_5m, bars_5m, sweep_best, NQ, execution, days=days_5m)
+    print(f"\nbest cell: {describe_sweep(sweep_best)}")
+    print(format_stats(summarize(sweep_result)))
+    sweep_result.frame().to_csv(RESULTS / "trades_sweep.csv", index=False)
+
+    sweep_controls = []
+    if not args.quick:
+        sweep_plans = [
+            p for p in (plan_sweep_session(bars_5m, d, sweep_best, NQ) for d in days_5m)
+            if p is not None
+        ]
+        observed = float(r_multiples(sweep_result).mean()) if sweep_result.filled else 0.0
+        sweep_controls = [
+            ControlResult(
+                "random direction",
+                args.draws,
+                random_direction(
+                    sweep_plans, bars_5m, NQ, execution,
+                    StrategyConfig(target_r=sweep_best.target_r), args.draws,
+                ),
+                observed,
+            )
+        ]
+        for control in sweep_controls:
+            print(control.summary())
+    positive_sweep = int((sweep_table["expectancy_r"] > 0).sum())
+    print(f"\n{positive_sweep} of {len(sweep_table)} sweep variants positive; "
+          f"best cell rests on {int(best['trades'])} trades")
+
     heading("SLIPPAGE SENSITIVITY")
     slip_table = slippage_sensitivity(bars_5m, bars_5m, days_5m, base)
     print(slip_table.to_string(index=False))
@@ -226,6 +336,30 @@ def main() -> None:
         },
         "market_context": market_context(bars_5m, days_5m),
         "baseline": stats.to_dict(),
+        "bias_comparison": bias_table.to_dict(orient="records"),
+        "sweep_setup": {
+            "grid": sweep_table.to_dict(orient="records"),
+            "best": {
+                "reference": sweep_best.reference,
+                "entry_anchor": sweep_best.entry_anchor,
+                "require_displacement": sweep_best.require_displacement,
+                "target_r": sweep_best.target_r,
+            },
+            "best_stats": summarize(sweep_result).to_dict(),
+            "best_equity": equity_curve(sweep_result),
+            "controls": [
+                {
+                    "name": c.name,
+                    "draws": c.draws,
+                    "control_mean_r": round(c.mean, 4),
+                    "actual_r": round(c.actual, 4),
+                    "percentile": round(c.percentile_of_actual, 1),
+                    "p_value": round(c.p_value, 4),
+                    "distribution": [round(float(v), 4) for v in c.expectancies],
+                }
+                for c in sweep_controls
+            ],
+        },
         "split_half": split_half(result),
         "slippage_sensitivity": slip_table.to_dict(orient="records"),
         "equity_curve": equity_curve(result),

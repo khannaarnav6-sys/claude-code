@@ -51,7 +51,7 @@ def test_stop_entry_breaks_the_pattern_high():
 def test_fade_uses_a_stop_into_the_gap_not_a_limit():
     # Price is above a bullish gap; fading it means selling as price breaks back
     # down into the gap, which is a sell stop at the near edge.
-    trade = _build_trade(bullish_gap(), TS.date(), cfg(bias="fade"), NQ, ET)
+    trade = _build_trade(bullish_gap(), TS.date(), cfg(displacement="fade"), NQ, ET)
     assert trade.direction == -1
     assert trade.entry_type == "stop"
     assert trade.entry_price == 120.0  # proximal edge
