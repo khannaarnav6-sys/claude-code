@@ -107,6 +107,19 @@ at the pre-move low: average risk goes from 15 to 72 points while the room left
 above is unchanged. A 2R target then needs a 144-point move after the move has
 already happened. Capping risk at 40–55 points does not rescue it.
 
+### It is already an AM-session strategy
+
+Moving the flat-by time from 15:55 to 13:00, 12:00 or 11:30 changes nothing at
+all: **no trade has ever reached a time exit**. Every one resolves at its stop
+or its target before 11:30, because the stop is a fraction of a session's range
+and the target is 2R away. The afternoon exit is a backstop that has not once
+been needed.
+
+Tightening the order-expiry from 12:00 to 11:30 does matter, since it cancels
+orders that had not yet filled: 29 trades become 25, and expectancy slips from
++0.65R to +0.55R. With the opening-range bias, an 11:30 expiry gives 18 trades
+at +0.83R.
+
 ## Sweep and reclaim
 
 Anchoring entry and stop to the *same* event fixes that geometry, and is the
