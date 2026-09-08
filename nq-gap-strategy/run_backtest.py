@@ -22,6 +22,7 @@ from gapstrat import bias as bias_module
 from gapstrat import data
 from gapstrat.backtest import ExecutionConfig, plans_for, r_multiples, rth_sessions, run, run_plans
 from gapstrat.controls import ControlResult, random_direction, run_controls
+from gapstrat.crossmarket import format_study, study
 from gapstrat.data import NQ
 from gapstrat.metrics import bootstrap_ci, equity_curve, format_stats, summarize
 from gapstrat.strategy import StrategyConfig, describe
@@ -297,6 +298,19 @@ def main() -> None:
     print(f"\n{positive_sweep} of {len(sweep_table)} sweep variants positive; "
           f"best cell rests on {int(best['trades'])} trades")
 
+    heading("CROSS-MARKET CHECK  (same rules on ES, YM and RTY)")
+    print("The cheapest out-of-sample test available: a rule that describes the New")
+    print("York open should show up in more than one index future. Thresholds are")
+    print("scaled to each market's own median session range.\n")
+    cross_tables = {}
+    for label, cfg in (("base rules", base),
+                       ("opening-range bias", replace(base, bias_method="opening_range")),
+                       ("prior-day bias", replace(base, bias_method="prior_day"))):
+        table, pooled = study(cfg, execution=execution, refresh=args.refresh)
+        cross_tables[label] = {"per_market": table.to_dict(orient="records"), "pooled": pooled}
+        print(format_study(table, pooled, f"--- {label} ---"))
+        print()
+
     heading("SLIPPAGE SENSITIVITY")
     slip_table = slippage_sensitivity(bars_5m, bars_5m, days_5m, base)
     print(slip_table.to_string(index=False))
@@ -337,6 +351,7 @@ def main() -> None:
         "market_context": market_context(bars_5m, days_5m),
         "baseline": stats.to_dict(),
         "bias_comparison": bias_table.to_dict(orient="records"),
+        "cross_market": cross_tables,
         "sweep_setup": {
             "grid": sweep_table.to_dict(orient="records"),
             "best": {

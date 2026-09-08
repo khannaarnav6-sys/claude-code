@@ -173,3 +173,31 @@ def coverage_report(bars: pd.DataFrame, start: str = "09:30", end: str = "16:00"
             "last": grouped.apply(lambda g: g.index[-1].strftime("%H:%M")),
         }
     )
+
+
+# Index futures that trade the same New York open. Testing one set of rules
+# across all four is the cheapest out-of-sample check available here: the
+# instruments are correlated enough that the setup should appear in each, and
+# independent enough that a result true of only one is probably luck.
+CONTRACTS = {
+    "NQ=F": Contract("NQ=F", tick_size=0.25, point_value=20.0, commission_round_turn=4.50),
+    "ES=F": Contract("ES=F", tick_size=0.25, point_value=50.0, commission_round_turn=4.50),
+    "YM=F": Contract("YM=F", tick_size=1.00, point_value=5.00, commission_round_turn=4.50),
+    "RTY=F": Contract("RTY=F", tick_size=0.10, point_value=50.0, commission_round_turn=4.50),
+}
+
+# NQ's absolute thresholds (5 point minimum gap, 100 point maximum stop) as
+# fractions of its own median session range, so they can be carried to an
+# instrument priced at 2,900 or 53,000 without meaning something different.
+GAP_FRACTION = 0.0133
+MAX_STOP_FRACTION = 0.267
+
+
+def median_session_range(bars: pd.DataFrame, days: list) -> float:
+    """Median high-to-low of the regular session, used to scale thresholds."""
+    ranges = []
+    for day in days:
+        session = session_slice(bars, day, "09:30", "15:55")
+        if not session.empty:
+            ranges.append(float(session["high"].max() - session["low"].min()))
+    return float(pd.Series(ranges).median()) if ranges else 0.0

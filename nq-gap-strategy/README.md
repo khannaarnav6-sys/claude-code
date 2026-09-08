@@ -8,10 +8,13 @@ It also tests two ways of sharpening that: filtering gaps by the session's
 the stop to the same reversal.
 
 The point of this project is not the equity curve. It is the set of checks
-around it — control permutations, a parameter grid, a bar-resolution test and a
-slippage ladder — that decide whether the equity curve means anything. On this
-sample the answer is "probably something in the base rules, nothing yet in the
-setup that looks best."
+around it — control permutations, a parameter grid, a bar-resolution test, a
+slippage ladder and a run across four index futures — that decide whether the
+equity curve means anything.
+
+**The short answer: the NQ result does not replicate.** The same rules on ES, YM
+and RTY return +0.24R per trade pooled over 130 trades (t = 1.81), against
++0.65R on NQ alone. NQ is the best of four, which is what luck looks like.
 
 ## The rules
 
@@ -75,6 +78,47 @@ the simulator takes the stop; on 5-minute bars that happened to a third of all
 trades. The headline +0.65R is therefore a *pessimistic* bound, not an
 optimistic one.
 
+
+## The cross-market check
+
+This is the most informative test in the project and the one that should be read
+first. NQ, ES, YM and RTY all trade the same New York open and the same macro
+news. A rule describing something real about that open should appear in more
+than one of them; a rule that lives only in NQ is far more likely to be the
+sample than the strategy. Thresholds are scaled to each market's own median
+session range, since five points means something different on RTY at 2,900 than
+on YM at 53,000.
+
+| Market | Trades | Win rate | Expectancy |
+|---|---|---|---|
+| NQ | 29 | 55% | **+0.65R** |
+| ES | 30 | 43% | +0.24R |
+| YM | 35 | 40% | +0.15R |
+| RTY | 36 | 36% | +0.01R |
+| **Pooled** | **130** | **43%** | **+0.24R**, t = 1.81 |
+
+All four are positive, which is mildly encouraging, and none of the other three
+is individually distinguishable from zero. The pooled +0.24R over 130 trades is
+the honest estimate of what these rules are worth — roughly a third of the NQ
+figure, and still short of significance.
+
+### The bias filter was overfitting, and this is how you can tell
+
+The opening-range bias looked like the project's best idea: it lifted NQ from
++0.65R to +0.86R. Across the other three markets it is **negative in all of
+them**, pooling to +0.09R (t = 0.61). It was the best of five methods chosen on
+one instrument, and it did not survive contact with three more.
+
+The prior-day bias, which looked mediocre on NQ, pools to **+0.28R and is
+positive in all four markets** (t = 1.63) — the more trustworthy of the two, and
+the opposite of what the single-market table suggested.
+
+| Rule set | Pooled expectancy | t | Markets positive |
+|---|---|---|---|
+| Prior-day bias | +0.28R | 1.63 | 4 of 4 |
+| Base rules, no filter | +0.24R | 1.81 | 4 of 4 |
+| Opening-range bias | +0.09R | 0.61 | 1 of 4 |
+
 ## Session bias
 
 The base rules take the first gap and trade whichever way it points. Adding a
@@ -91,9 +135,14 @@ evaluated only from bars that had already printed when the order would go in.
 | Sweep-and-reclaim | 21 | 38% | +0.19R | [−0.44, +0.82] |
 
 The most recent break of the first 15 minutes' range is the only filter that
-clearly beats taking every gap, and it costs 8 of 29 trades to get there. That
-is the trade-off every filter makes: a better average on a thinner sample is not
-automatically a better strategy, and the interval barely narrows.
+clearly beats taking every gap here, and it costs 8 of 29 trades to get there.
+That is the trade-off every filter makes: a better average on a thinner sample is
+not automatically a better strategy, and the interval barely narrows.
+
+**This table is one market, and it is misleading.** The cross-market check above
+reverses its ordering entirely: the opening-range filter is negative on ES, YM
+and RTY, while the prior-day filter is positive on all four. Read this table as
+the illustration of how a single-market ranking goes wrong, not as a ranking.
 
 ### The structural stop makes things worse
 
@@ -143,8 +192,10 @@ answerable on two months of data.
 
 ### Why not to trade any of this yet
 
-- **29 trades.** The confidence interval's lower edge is +0.12R, barely above
-  zero. One extra losing streak flips the conclusion.
+- **It does not replicate across markets.** 130 pooled trades give +0.24R at
+  t = 1.81 — the NQ figure is the best of four, not a typical one.
+- **29 trades on NQ.** The confidence interval's lower edge is +0.12R, barely
+  above zero. One extra losing streak flips the conclusion.
 - **68 calendar days of a single regime.** No high-volatility stretch, no rate
   shock, no earnings-season cluster.
 - **The parameter grid is a multiple-comparisons machine.** 25 variants on one sample.
@@ -164,7 +215,7 @@ python3 run_backtest.py              # full report
 python3 run_backtest.py --refresh    # re-download bars first
 python3 run_backtest.py --quick      # skip the 500-draw control permutations
 python3 run_backtest.py --target-r 3 --entry-style proximal
-python3 -m pytest tests -q           # 64 tests
+python3 -m pytest tests -q           # 70 tests
 ```
 
 Writes `results/trades_baseline.csv` and `results/trades_sweep.csv` (the trade
@@ -179,6 +230,7 @@ ledgers), `results/sweep.csv` (the parameter grid) and `results/summary.json`.
 | `gapstrat/strategy.py` | Rules: which gap, which side, what levels |
 | `gapstrat/bias.py` | Session bias: which side to look for today |
 | `gapstrat/sweep.py` | The stop-run-and-reverse setup |
+| `gapstrat/crossmarket.py` | One rule set across ES, YM and RTY |
 | `gapstrat/backtest.py` | Bar-by-bar fill simulation |
 | `gapstrat/metrics.py` | Statistics, bootstrap intervals |
 | `gapstrat/controls.py` | Permutation nulls the strategy has to beat |
