@@ -336,6 +336,38 @@ def run_ict(bars, exec_bars, config, contract, execution=None, days=None):
     return out
 
 
+# Thresholds calibrated on NQ, expressed as fractions of its median session
+# range so the same model can be pointed at another instrument for validation.
+PENETRATION_FRACTION = 0.0027
+STOP_FRACTION = 0.0133
+MAX_STOP_FRACTION = 0.267
+
+
+def scaled_for(config: ICTConfig, session_range: float) -> ICTConfig:
+    """Restate the model's point thresholds for one instrument's range."""
+    from dataclasses import replace
+
+    return replace(
+        config,
+        min_penetration=round(PENETRATION_FRACTION * session_range, 4),
+        min_stop_points=round(STOP_FRACTION * session_range, 4),
+        max_stop_points=round(MAX_STOP_FRACTION * session_range, 4),
+    )
+
+
+def nq_model() -> ICTConfig:
+    """The configuration actually traded: NQ, Asia range as the draw.
+
+    NQ is the only instrument this is traded on. ES, YM and RTY appear in the
+    test suite as *validation* -- a rule that describes the New York open
+    should survive being pointed at a neighbouring index -- and are never
+    traded. Those are separate decisions and it is worth keeping them separate:
+    restricting the trading universe is a risk choice, restricting the
+    validation universe is just a smaller sample.
+    """
+    return ICTConfig()
+
+
 def describe(config: ICTConfig) -> str:
     parts = [f"ict/{config.entry_model}", f"target={config.target}"]
     if config.require_mss:

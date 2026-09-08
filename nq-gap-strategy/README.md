@@ -80,6 +80,71 @@ optimistic one.
 
 
 
+
+## What is actually traded: NQ, and only NQ
+
+The instrument is `NQ=F` — Yahoo reports it as `instrumentType: FUTURE` on CME,
+front-month E-mini Nasdaq 100 (currently "Nasdaq 100 Sep 26"), quoted at 29,702
+against the cash index at 29,544. That ~158-point basis is the futures premium,
+and it confirms these are genuine futures rather than the index or QQQ.
+
+Continuous front-month series carry roll jumps, which would fake overnight gaps
+and trigger false signals. There are none in this window: **zero** overnight
+moves beyond 4 standard deviations and one bar-to-bar move above 1%. The
+June→September roll fell before the sample starts.
+
+**Trading NQ only and validating on NQ only are different decisions.** The first
+is a risk choice and it is respected — ES, YM and RTY are never traded. The
+second is just a smaller sample, and it is the thing that made the earlier
+results look better than they were. The other three indices stay in the test
+suite as validation and nowhere else.
+
+### The model on NQ alone
+
+| | Full model | Trimmed to 3 core stages |
+|---|---|---|
+| Setups / filled | 18 / 13 | 25 / 18 |
+| Win rate | 62% | 44% |
+| Expectancy | +1.59R | +1.10R |
+| 95% CI | [+0.19, +3.14] | [−0.12, +2.49] |
+| Max drawdown | 2.0R | 5.0R (5-loss streak) |
+| Direction control | p = 0.060 | p = 0.166 |
+| First half / second half | +0.61R / +2.44R | +0.13R / +2.06R |
+
+Three things in that table matter more than the headline:
+
+**Both halves disagree violently.** The first half of the sample makes almost
+nothing and the second half makes everything. On 13 trades that is not a
+regime observation, it is what noise looks like.
+
+**Trimming made it worse on NQ, though the pooled ablation said the opposite.**
+Across four markets the discount/premium filter was worth ~0.10R for 11 trades;
+on NQ alone dropping it costs 0.5R. The two answers disagree because neither
+sample can settle it — which is the argument for keeping the other three
+indices as validation.
+
+**The control mean is very high.** Randomising direction on the same setups
+still averages +0.62R to +0.68R. With an Asia-range target the average win is
+3.2R against a 1R loss, so a coin flip only needs a 24% win rate to break even
+and gets about 40% here. Much of what looks like edge is the payoff ratio, not
+the directional read — which is exactly why the control comparison, not the
+expectancy, is the number to watch.
+
+### Bar resolution cuts the other way for this model
+
+On the 20 sessions with 1-minute data, the ICT model scores **+2.01R on 5-minute
+bars and +1.41R on 1-minute bars**. That is the reverse of the gap strategy,
+where finer bars helped. Wide stops and distant targets mean a 5-minute bar can
+step over a stop that a 1-minute bar registers, so here the 5-minute figure is
+*optimistic*, not conservative.
+
+### Sizing
+
+Average risk is 40 points, or **$800 on one NQ** and $80 on one MNQ; the worst
+was 88 points ($1,755 / $176). On a 2% risk budget that implies roughly a
+$40,000 account per NQ contract, or $4,000 per MNQ. For any account where the
+former is a stretch, MNQ is the same strategy at a tenth the size.
+
 ## The full ICT model
 
 The complete A+ sequence, with every stage switchable so each can be measured:

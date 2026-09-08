@@ -150,14 +150,7 @@ def sweep_setup_study(signal_bars, exec_bars, days, execution) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values("expectancy_r", ascending=False)
 
 
-def scale_ict(config: ICTConfig, session_range: float) -> ICTConfig:
-    """Restate the ICT model's point thresholds for one instrument's range."""
-    return replace(
-        config,
-        min_penetration=round(0.0027 * session_range, 4),
-        min_stop_points=round(0.0133 * session_range, 4),
-        max_stop_points=round(0.267 * session_range, 4),
-    )
+from gapstrat.ict import scaled_for as scale_ict
 
 
 def ict_ablation(execution, draws_note: str = "") -> pd.DataFrame:
