@@ -1,0 +1,15 @@
+variant,setups,trades,win_rate,expectancy_r,total_r,t_stat
+full model,60,40,0.425,0.492,19.67,1.44
+no structure shift,71,49,0.367,0.165,8.07,0.65
+no imbalance required,155,105,0.143,-0.18,-18.87,-0.69
+no discount/premium,75,51,0.392,0.39,19.91,1.31
+no close-back on sweep,127,87,0.23,-0.126,-10.93,-0.61
+entry at OTE,108,57,0.281,0.258,14.72,0.69
+entry at swept level,109,54,0.241,0.291,15.7,0.72
+target nearest pool,55,36,0.417,0.514,18.52,1.46
+target prior day,56,40,0.35,0.122,4.9,0.46
+target fixed 2R,81,59,0.424,0.282,16.62,1.42
++ weekly/daily FVG filter,38,24,0.375,0.449,10.78,1.04
++ new-week-gap filter,43,29,0.379,0.134,3.89,0.41
+Asia pool only,21,16,0.375,0.422,6.74,0.78
+"sweep only, no confirmation",158,112,0.161,0.11,12.3,0.38

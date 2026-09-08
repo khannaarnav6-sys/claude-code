@@ -23,6 +23,9 @@ from gapstrat import data
 from gapstrat.backtest import ExecutionConfig, plans_for, r_multiples, rth_sessions, run, run_plans
 from gapstrat.controls import ControlResult, random_direction, run_controls
 from gapstrat.crossmarket import format_study, study
+from gapstrat.data import CONTRACTS, median_session_range
+from gapstrat.ict import ICTConfig, run_ict
+from gapstrat.ict import describe as describe_ict
 from gapstrat.data import NQ
 from gapstrat.metrics import bootstrap_ci, equity_curve, format_stats, summarize
 from gapstrat.strategy import StrategyConfig, describe
@@ -145,6 +148,93 @@ def sweep_setup_study(signal_bars, exec_bars, days, execution) -> pd.DataFrame:
                     }
                 )
     return pd.DataFrame(rows).sort_values("expectancy_r", ascending=False)
+
+
+def scale_ict(config: ICTConfig, session_range: float) -> ICTConfig:
+    """Restate the ICT model's point thresholds for one instrument's range."""
+    return replace(
+        config,
+        min_penetration=round(0.0027 * session_range, 4),
+        min_stop_points=round(0.0133 * session_range, 4),
+        max_stop_points=round(0.267 * session_range, 4),
+    )
+
+
+def ict_ablation(execution, draws_note: str = "") -> pd.DataFrame:
+    """Turn each confluence off in turn and see what it was worth.
+
+    A nine-confluence model measured as one blob cannot say which confluence
+    did the work. Pooling all four markets is what makes the comparison
+    readable at all -- on one market each row would be a dozen trades.
+    """
+    base = ICTConfig()
+    grid = [
+        ("full model", base),
+        ("no structure shift", replace(base, require_mss=False)),
+        ("no imbalance required", replace(base, require_fvg=False, entry_model="ote")),
+        ("no discount/premium", replace(base, require_discount=False)),
+        ("no close-back on sweep", replace(base, require_close_back=False)),
+        ("entry at OTE", replace(base, entry_model="ote")),
+        ("entry at swept level", replace(base, entry_model="level")),
+        ("target nearest pool", replace(base, target="nearest")),
+        ("target prior day", replace(base, target="prior_day")),
+        ("target fixed 2R", replace(base, target="fixed")),
+        ("+ weekly/daily FVG filter", replace(base, respect_htf_fvg=True)),
+        ("+ new-week-gap filter", replace(base, require_nwog_side=True)),
+        ("Asia pool only", replace(base, sweep_pools=("asia",))),
+        ("sweep only, no confirmation", replace(base, require_mss=False, require_fvg=False,
+                                                require_discount=False, entry_model="ote")),
+    ]
+    cache = {sym: data.load(sym, "5m") for sym in CONTRACTS}
+    ranges = {sym: median_session_range(b, rth_sessions(b)) for sym, b in cache.items()}
+
+    rows = []
+    for name, cfg in grid:
+        pooled, setups = [], 0
+        for sym, contract in CONTRACTS.items():
+            bars = cache[sym]
+            days = rth_sessions(bars)
+            result = run_ict(bars, bars, scale_ict(cfg, ranges[sym]), contract, execution, days=days)
+            setups += result.sessions_with_setup
+            pooled.extend(t.r_multiple for t in result.filled)
+        r = np.array(pooled, dtype=float)
+        sd = float(r.std(ddof=1)) if r.size > 1 else 0.0
+        rows.append(
+            {
+                "variant": name,
+                "setups": setups,
+                "trades": int(r.size),
+                "win_rate": round(float((r > 0).mean()), 3) if r.size else 0.0,
+                "expectancy_r": round(float(r.mean()), 3) if r.size else 0.0,
+                "total_r": round(float(r.sum()), 2) if r.size else 0.0,
+                "t_stat": round(float(r.mean() / (sd / np.sqrt(r.size))), 2) if sd and r.size > 1 else 0.0,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def ict_per_market(execution) -> pd.DataFrame:
+    """The full model, market by market."""
+    rows = []
+    for sym, contract in CONTRACTS.items():
+        bars = data.load(sym, "5m")
+        days = rth_sessions(bars)
+        cfg = scale_ict(ICTConfig(), median_session_range(bars, days))
+        stats = summarize(run_ict(bars, bars, cfg, contract, execution, days=days))
+        rows.append(
+            {
+                "symbol": sym,
+                "setups": stats.setups,
+                "trades": stats.trades,
+                "win_rate": stats.win_rate,
+                "expectancy_r": stats.expectancy_r,
+                "ci_low": stats.expectancy_r_ci[0],
+                "ci_high": stats.expectancy_r_ci[1],
+                "avg_win_r": stats.avg_win_r,
+                "total_r": stats.total_r,
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def market_context(bars: pd.DataFrame, days: list) -> str:
@@ -298,6 +388,19 @@ def main() -> None:
     print(f"\n{positive_sweep} of {len(sweep_table)} sweep variants positive; "
           f"best cell rests on {int(best['trades'])} trades")
 
+    heading("ICT MODEL  (sweep -> structure shift -> imbalance -> liquidity target)")
+    print(f"config: {describe_ict(ICTConfig())}\n")
+    ict_markets = ict_per_market(execution)
+    print(ict_markets.to_string(index=False))
+    ict_result = run_ict(bars_5m, bars_5m, scale_ict(ICTConfig(),
+                         data.median_session_range(bars_5m, days_5m)), NQ, execution, days=days_5m)
+    ict_result.frame().to_csv(RESULTS / "trades_ict.csv", index=False)
+
+    print("\nWhat each confluence is worth, pooled across all four markets:")
+    ablation = ict_ablation(execution)
+    print(ablation.to_string(index=False))
+    ablation.to_csv(RESULTS / "ict_ablation.csv", index=False)
+
     heading("CROSS-MARKET CHECK  (same rules on ES, YM and RTY)")
     print("The cheapest out-of-sample test available: a rule that describes the New")
     print("York open should show up in more than one index future. Thresholds are")
@@ -352,6 +455,13 @@ def main() -> None:
         "baseline": stats.to_dict(),
         "bias_comparison": bias_table.to_dict(orient="records"),
         "cross_market": cross_tables,
+        "ict": {
+            "config": describe_ict(ICTConfig()),
+            "per_market": ict_markets.to_dict(orient="records"),
+            "ablation": ablation.to_dict(orient="records"),
+            "nq_stats": summarize(ict_result).to_dict(),
+            "nq_equity": equity_curve(ict_result),
+        },
         "sweep_setup": {
             "grid": sweep_table.to_dict(orient="records"),
             "best": {

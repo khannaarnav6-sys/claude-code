@@ -94,6 +94,9 @@ class PlannedTrade:
     breakeven_r: float | None = None
     reference_price: float = 0.0  # market price when the order was placed
     session_bias: int = 0  # the bias in force when the order was placed
+    swept: str = ""  # the liquidity pool taken before the reversal
+    target_name: str = ""  # the pool the trade is drawing toward
+    notes: str = ""  # which confluences the setup actually carried
 
     @property
     def risk_points(self) -> float:

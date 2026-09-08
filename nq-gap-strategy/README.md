@@ -79,6 +79,77 @@ trades. The headline +0.65R is therefore a *pessimistic* bound, not an
 optimistic one.
 
 
+
+## The full ICT model
+
+The complete A+ sequence, with every stage switchable so each can be measured:
+
+1. **Draw** — before the open, map the liquidity: Asia (20:00–00:00), London
+   (02:00–05:00) and overnight ranges, prior day and week, and the new week
+   opening gap (Friday 17:00 close → Sunday 18:00 open).
+2. **Sweep** — inside the 08:30–11:00 killzone, price runs one of those pools
+   and *closes back* inside. Running a low turns the bias up.
+3. **Shift** — price then closes through the last fractal swing formed before
+   the sweep. That is the market structure shift.
+4. **Imbalance** — the move that shifts structure leaves a fair value gap.
+5. **Entry** — a limit into that gap, required to sit in the discount half of
+   the dealing range for a long (premium for a short). OTE (62–79%) and the
+   swept level itself are alternatives.
+6. **Stop** — beyond the wick that swept the pool.
+7. **Target** — the opposing pool. By default the Asia range: run the Asia low,
+   target the Asia high. Weekly and daily imbalances are available as a filter
+   on the path to that target.
+
+| Market | Setups | Trades | Win rate | Expectancy |
+|---|---|---|---|---|
+| NQ | 18 | 13 | 62% | **+1.59R** |
+| ES | 20 | 14 | 36% | +0.14R |
+| YM | 12 | 6 | 0% | −1.03R |
+| RTY | 10 | 7 | 57% | +0.45R |
+| **Pooled** | **60** | **40** | **43%** | **+0.49R**, t = 1.44 |
+
+It beats a randomised-direction control at p = 0.075 — much stronger than the
+sweep setup's 0.37, still short of significance. And NQ is again the outlier:
+YM produced six trades and not one winner.
+
+### What each confluence is actually worth
+
+Pooled across all four markets, turning one stage off at a time. This is the
+table worth reading, because a nine-confluence model measured as a single blob
+cannot tell you which of the nine did the work.
+
+| Variant | Trades | Win rate | Expectancy | t |
+|---|---|---|---|---|
+| **Full model** | 40 | 43% | **+0.49R** | 1.44 |
+| Target nearest pool | 36 | 42% | +0.51R | 1.46 |
+| No discount/premium | 51 | 39% | +0.39R | 1.31 |
+| Target fixed 2R | 59 | 42% | +0.28R | 1.42 |
+| Entry at swept level | 54 | 24% | +0.29R | 0.72 |
+| Entry at OTE | 57 | 28% | +0.26R | 0.69 |
+| No structure shift | 49 | 37% | +0.17R | 0.65 |
+| Sweep only, no confirmation | 112 | 16% | +0.11R | 0.38 |
+| **No close-back on sweep** | 87 | 23% | **−0.13R** | −0.61 |
+| **No imbalance required** | 105 | 14% | **−0.18R** | −0.69 |
+
+**Three components carry the model.** Requiring the sweep bar to *close back*
+inside the level is the single biggest one: without it, expectancy goes from
++0.49R to −0.13R and the win rate collapses from 43% to 23%. That is the whole
+difference between a stop run and a genuine breakdown. Requiring an imbalance is
+next (+0.49R → −0.18R), then the structure shift (+0.49R → +0.17R).
+
+**The rest is decoration on this sample.** Discount/premium costs 11 trades to
+add 0.10R. The weekly/daily FVG filter cuts trades from 40 to 24 and changes
+expectancy by −0.04R. The new-week-gap filter actively hurts (+0.13R). Narrowing
+the sweep to the Asia pool alone leaves 16 trades and no improvement.
+
+### On the Asia target specifically
+
+Targeting the Asia range does beat a fixed 2R on expectancy — +0.49R against
++0.28R — but **not on statistical strength**: t = 1.44 versus 1.42, because the
+liquidity target fires less often and produces far more variable R. "Nearest
+pool" is indistinguishable from Asia (+0.51R). So the Asia draw is defensible
+and it is *not* demonstrably better than simply targeting 2R.
+
 ## The cross-market check
 
 This is the most informative test in the project and the one that should be read
@@ -215,7 +286,7 @@ python3 run_backtest.py              # full report
 python3 run_backtest.py --refresh    # re-download bars first
 python3 run_backtest.py --quick      # skip the 500-draw control permutations
 python3 run_backtest.py --target-r 3 --entry-style proximal
-python3 -m pytest tests -q           # 70 tests
+python3 -m pytest tests -q           # 98 tests
 ```
 
 Writes `results/trades_baseline.csv` and `results/trades_sweep.csv` (the trade
@@ -230,6 +301,8 @@ ledgers), `results/sweep.csv` (the parameter grid) and `results/summary.json`.
 | `gapstrat/strategy.py` | Rules: which gap, which side, what levels |
 | `gapstrat/bias.py` | Session bias: which side to look for today |
 | `gapstrat/sweep.py` | The stop-run-and-reverse setup |
+| `gapstrat/liquidity.py` | Session ranges, weekly gaps, HTF imbalances |
+| `gapstrat/ict.py` | The full A+ model and its ablation |
 | `gapstrat/crossmarket.py` | One rule set across ES, YM and RTY |
 | `gapstrat/backtest.py` | Bar-by-bar fill simulation |
 | `gapstrat/metrics.py` | Statistics, bootstrap intervals |
