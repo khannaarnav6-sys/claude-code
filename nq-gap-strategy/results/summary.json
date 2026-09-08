@@ -1,0 +1,811 @@
+{
+  "generated_for_sessions": [
+    "2026-06-29",
+    "2026-06-30",
+    "2026-07-01",
+    "2026-07-02",
+    "2026-07-06",
+    "2026-07-07",
+    "2026-07-08",
+    "2026-07-09",
+    "2026-07-10",
+    "2026-07-13",
+    "2026-07-14",
+    "2026-07-15",
+    "2026-07-16",
+    "2026-07-17",
+    "2026-07-20",
+    "2026-07-21",
+    "2026-07-22",
+    "2026-07-23",
+    "2026-07-24",
+    "2026-07-27",
+    "2026-07-28",
+    "2026-07-29",
+    "2026-07-30",
+    "2026-07-31",
+    "2026-08-03",
+    "2026-08-04",
+    "2026-08-05",
+    "2026-08-06",
+    "2026-08-07",
+    "2026-08-10",
+    "2026-08-11",
+    "2026-08-12",
+    "2026-08-13",
+    "2026-08-14",
+    "2026-08-17",
+    "2026-08-18",
+    "2026-08-19",
+    "2026-08-20",
+    "2026-08-21",
+    "2026-08-24",
+    "2026-08-25",
+    "2026-08-26",
+    "2026-08-27",
+    "2026-08-28",
+    "2026-08-31",
+    "2026-09-01",
+    "2026-09-02",
+    "2026-09-03",
+    "2026-09-04"
+  ],
+  "config": {
+    "target_r": 2.0,
+    "entry_style": "mid",
+    "entry_type": "limit",
+    "stop_style": "gap_far",
+    "signal_cutoff": "11:00",
+    "entry_expiry": "12:00",
+    "exit_time": "15:55",
+    "min_gap_points": 5.0,
+    "slippage_ticks": 1,
+    "commission_round_turn": 4.5
+  },
+  "market_context": "NQ over the sample: 29,643 -> 29,569  (-74 pts, -0.2%)\n21 of 49 sessions closed above their 09:30 open  (43%)\naverage RTH range 409 pts   median 375 pts",
+  "baseline": {
+    "sessions": 49,
+    "setups": 41,
+    "trades": 29,
+    "fill_rate": 0.707,
+    "wins": 16,
+    "losses": 13,
+    "scratches": 0,
+    "win_rate": 0.552,
+    "expectancy_r": 0.648,
+    "expectancy_r_ci": [
+      0.122,
+      1.173
+    ],
+    "median_r": 1.974,
+    "avg_win_r": 2.006,
+    "avg_loss_r": -1.024,
+    "profit_factor": 2.41,
+    "total_r": 18.78,
+    "net_dollars": 6844.5,
+    "dollars_per_trade": 236.02,
+    "max_drawdown_r": 3.11,
+    "max_drawdown_dollars": 984.0,
+    "longest_losing_streak": 3,
+    "sharpe_per_trade": 0.422,
+    "t_stat": 2.27,
+    "ambiguous_bars": 10,
+    "exit_breakdown": {
+      "target": 16,
+      "stop": 13
+    },
+    "direction_breakdown": {
+      "long": {
+        "n": 14,
+        "win_rate": 0.643,
+        "expectancy_r": 0.928
+      },
+      "short": {
+        "n": 15,
+        "win_rate": 0.467,
+        "expectancy_r": 0.386
+      }
+    }
+  },
+  "split_half": "first half  n=14  expectancy +0.708R  (2026-06-29 .. 2026-07-29)\nsecond half n=15  expectancy +0.591R  (2026-08-03 .. 2026-09-03)",
+  "slippage_sensitivity": [
+    {
+      "slippage_ticks": 0,
+      "dollars_per_side": 0.0,
+      "trades": 29,
+      "expectancy_r": 0.658,
+      "total_r": 19.09,
+      "net_dollars": 6909.5
+    },
+    {
+      "slippage_ticks": 1,
+      "dollars_per_side": 5.0,
+      "trades": 29,
+      "expectancy_r": 0.648,
+      "total_r": 18.78,
+      "net_dollars": 6844.5
+    },
+    {
+      "slippage_ticks": 2,
+      "dollars_per_side": 10.0,
+      "trades": 29,
+      "expectancy_r": 0.637,
+      "total_r": 18.46,
+      "net_dollars": 6779.5
+    },
+    {
+      "slippage_ticks": 4,
+      "dollars_per_side": 20.0,
+      "trades": 29,
+      "expectancy_r": 0.615,
+      "total_r": 17.84,
+      "net_dollars": 6649.5
+    }
+  ],
+  "equity_curve": [
+    {
+      "day": "2026-06-29",
+      "r": 2.011,
+      "cum_r": 2.011,
+      "cum_dollars": 1815.5
+    },
+    {
+      "day": "2026-07-07",
+      "r": -1.024,
+      "cum_r": 0.987,
+      "cum_dollars": 1596.0
+    },
+    {
+      "day": "2026-07-09",
+      "r": 2.031,
+      "cum_r": 3.018,
+      "cum_dollars": 2241.5
+    },
+    {
+      "day": "2026-07-10",
+      "r": 2.0,
+      "cum_r": 5.018,
+      "cum_dollars": 3057.0
+    },
+    {
+      "day": "2026-07-13",
+      "r": -1.048,
+      "cum_r": 3.971,
+      "cum_dollars": 2942.5
+    },
+    {
+      "day": "2026-07-14",
+      "r": 2.028,
+      "cum_r": 5.999,
+      "cum_dollars": 3668.0
+    },
+    {
+      "day": "2026-07-16",
+      "r": 1.974,
+      "cum_r": 7.972,
+      "cum_dollars": 4413.5
+    },
+    {
+      "day": "2026-07-17",
+      "r": -1.017,
+      "cum_r": 6.955,
+      "cum_dollars": 4109.0
+    },
+    {
+      "day": "2026-07-21",
+      "r": 2.0,
+      "cum_r": 8.955,
+      "cum_dollars": 4724.5
+    },
+    {
+      "day": "2026-07-22",
+      "r": 2.0,
+      "cum_r": 10.955,
+      "cum_dollars": 4980.0
+    },
+    {
+      "day": "2026-07-23",
+      "r": -1.014,
+      "cum_r": 9.941,
+      "cum_dollars": 4625.5
+    },
+    {
+      "day": "2026-07-24",
+      "r": 2.0,
+      "cum_r": 11.941,
+      "cum_dollars": 6191.0
+    },
+    {
+      "day": "2026-07-28",
+      "r": -1.016,
+      "cum_r": 10.925,
+      "cum_dollars": 5866.5
+    },
+    {
+      "day": "2026-07-29",
+      "r": -1.008,
+      "cum_r": 9.917,
+      "cum_dollars": 5207.0
+    },
+    {
+      "day": "2026-08-03",
+      "r": 2.0,
+      "cum_r": 11.917,
+      "cum_dollars": 5422.5
+    },
+    {
+      "day": "2026-08-04",
+      "r": 2.0,
+      "cum_r": 13.917,
+      "cum_dollars": 5638.0
+    },
+    {
+      "day": "2026-08-06",
+      "r": 2.054,
+      "cum_r": 15.971,
+      "cum_dollars": 6013.5
+    },
+    {
+      "day": "2026-08-07",
+      "r": 2.0,
+      "cum_r": 17.971,
+      "cum_dollars": 6699.0
+    },
+    {
+      "day": "2026-08-10",
+      "r": -1.012,
+      "cum_r": 16.959,
+      "cum_dollars": 6284.5
+    },
+    {
+      "day": "2026-08-11",
+      "r": 2.042,
+      "cum_r": 19.001,
+      "cum_dollars": 6770.0
+    },
+    {
+      "day": "2026-08-12",
+      "r": -1.036,
+      "cum_r": 17.965,
+      "cum_dollars": 6620.5
+    },
+    {
+      "day": "2026-08-18",
+      "r": -1.019,
+      "cum_r": 16.946,
+      "cum_dollars": 6346.0
+    },
+    {
+      "day": "2026-08-19",
+      "r": 1.955,
+      "cum_r": 18.901,
+      "cum_dollars": 6771.5
+    },
+    {
+      "day": "2026-08-24",
+      "r": -1.014,
+      "cum_r": 17.887,
+      "cum_dollars": 6392.0
+    },
+    {
+      "day": "2026-08-26",
+      "r": 2.0,
+      "cum_r": 19.887,
+      "cum_dollars": 6687.5
+    },
+    {
+      "day": "2026-08-28",
+      "r": -1.036,
+      "cum_r": 18.851,
+      "cum_dollars": 6538.0
+    },
+    {
+      "day": "2026-08-31",
+      "r": -1.029,
+      "cum_r": 17.823,
+      "cum_dollars": 6353.5
+    },
+    {
+      "day": "2026-09-01",
+      "r": -1.043,
+      "cum_r": 16.779,
+      "cum_dollars": 6229.0
+    },
+    {
+      "day": "2026-09-03",
+      "r": 2.0,
+      "cum_r": 18.779,
+      "cum_dollars": 6844.5
+    }
+  ],
+  "bar_resolution_check": {
+    "sessions": 20,
+    "5m fills": {
+      "sessions": 20,
+      "setups": 16,
+      "trades": 11,
+      "fill_rate": 0.688,
+      "wins": 4,
+      "losses": 7,
+      "scratches": 0,
+      "win_rate": 0.364,
+      "expectancy_r": 0.073,
+      "expectancy_r_ci": [
+        -0.752,
+        0.905
+      ],
+      "median_r": -1.014,
+      "avg_win_r": 1.999,
+      "avg_loss_r": -1.027,
+      "profit_factor": 1.112,
+      "total_r": 0.81,
+      "net_dollars": 145.5,
+      "dollars_per_trade": 13.23,
+      "max_drawdown_r": 3.11,
+      "max_drawdown_dollars": 542.5,
+      "longest_losing_streak": 3,
+      "sharpe_per_trade": 0.048,
+      "t_stat": 0.16,
+      "ambiguous_bars": 5,
+      "exit_breakdown": {
+        "stop": 7,
+        "target": 4
+      },
+      "direction_breakdown": {
+        "long": {
+          "n": 6,
+          "win_rate": 0.333,
+          "expectancy_r": -0.013
+        },
+        "short": {
+          "n": 5,
+          "win_rate": 0.4,
+          "expectancy_r": 0.177
+        }
+      }
+    },
+    "1m fills": {
+      "sessions": 20,
+      "setups": 16,
+      "trades": 10,
+      "fill_rate": 0.625,
+      "wins": 5,
+      "losses": 5,
+      "scratches": 0,
+      "win_rate": 0.5,
+      "expectancy_r": 0.477,
+      "expectancy_r_ci": [
+        -0.424,
+        1.385
+      ],
+      "median_r": 0.45,
+      "avg_win_r": 1.977,
+      "avg_loss_r": -1.022,
+      "profit_factor": 1.934,
+      "total_r": 4.77,
+      "net_dollars": 475.0,
+      "dollars_per_trade": 47.5,
+      "max_drawdown_r": 2.1,
+      "max_drawdown_dollars": 692.5,
+      "longest_losing_streak": 2,
+      "sharpe_per_trade": 0.302,
+      "t_stat": 0.96,
+      "ambiguous_bars": 0,
+      "exit_breakdown": {
+        "stop": 5,
+        "target": 5
+      },
+      "direction_breakdown": {
+        "long": {
+          "n": 6,
+          "win_rate": 0.5,
+          "expectancy_r": 0.48
+        },
+        "short": {
+          "n": 4,
+          "win_rate": 0.5,
+          "expectancy_r": 0.474
+        }
+      }
+    }
+  },
+  "controls": [
+    {
+      "name": "random direction",
+      "draws": 500,
+      "control_mean_r": 0.2226,
+      "actual_r": 0.6476,
+      "percentile": 98.8,
+      "p_value": 0.012
+    },
+    {
+      "name": "random gap",
+      "draws": 500,
+      "control_mean_r": 0.3228,
+      "actual_r": 0.6476,
+      "percentile": 93.8,
+      "p_value": 0.062
+    }
+  ],
+  "expectancy_bootstrap_ci": [
+    0.1220749263720585,
+    1.173126689175487
+  ],
+  "sweep": [
+    {
+      "variant": "with/limit mid stop=gap_far 2R",
+      "entry_style": "mid",
+      "cutoff": "10:30",
+      "min_gap": 5.0,
+      "trades": 26,
+      "win_rate": 0.615,
+      "expectancy_r": 0.841,
+      "ci_low": 0.258,
+      "ci_high": 1.422,
+      "total_r": 21.86,
+      "net_dollars": 7453.0,
+      "max_dd_r": 2.08,
+      "profit_factor": 3.137
+    },
+    {
+      "variant": "with/limit mid stop=gap_far 2R",
+      "entry_style": "mid",
+      "cutoff": "12:00",
+      "min_gap": 5.0,
+      "trades": 33,
+      "win_rate": 0.576,
+      "expectancy_r": 0.721,
+      "ci_low": 0.173,
+      "ci_high": 1.188,
+      "total_r": 23.79,
+      "net_dollars": 8031.5,
+      "max_dd_r": 3.11,
+      "profit_factor": 2.657
+    },
+    {
+      "variant": "with/limit mid stop=gap_far 2R",
+      "entry_style": "mid",
+      "cutoff": "10:00",
+      "min_gap": 5.0,
+      "trades": 21,
+      "win_rate": 0.571,
+      "expectancy_r": 0.707,
+      "ci_low": 0.122,
+      "ci_high": 1.29,
+      "total_r": 14.85,
+      "net_dollars": 6015.5,
+      "max_dd_r": 3.09,
+      "profit_factor": 2.61
+    },
+    {
+      "variant": "with/limit mid stop=gap_far 2R",
+      "entry_style": "mid",
+      "cutoff": "11:00",
+      "min_gap": 10.0,
+      "trades": 27,
+      "win_rate": 0.556,
+      "expectancy_r": 0.66,
+      "ci_low": 0.099,
+      "ci_high": 1.222,
+      "total_r": 17.83,
+      "net_dollars": 6928.5,
+      "max_dd_r": 2.06,
+      "profit_factor": 2.454
+    },
+    {
+      "variant": "with/limit proximal stop=gap_far 3R",
+      "entry_style": "proximal",
+      "cutoff": "11:00",
+      "min_gap": 5.0,
+      "trades": 36,
+      "win_rate": 0.417,
+      "expectancy_r": 0.659,
+      "ci_low": -0.008,
+      "ci_high": 1.328,
+      "total_r": 23.74,
+      "net_dollars": 5978.0,
+      "max_dd_r": 5.08,
+      "profit_factor": 2.117
+    },
+    {
+      "variant": "with/limit mid stop=gap_far 2R",
+      "entry_style": "mid",
+      "cutoff": "11:00",
+      "min_gap": 5.0,
+      "trades": 29,
+      "win_rate": 0.552,
+      "expectancy_r": 0.648,
+      "ci_low": 0.122,
+      "ci_high": 1.173,
+      "total_r": 18.78,
+      "net_dollars": 6844.5,
+      "max_dd_r": 3.11,
+      "profit_factor": 2.41
+    },
+    {
+      "variant": "with/limit mid stop=gap_far 2R be@1R",
+      "entry_style": "mid",
+      "cutoff": "11:00",
+      "min_gap": 5.0,
+      "trades": 29,
+      "win_rate": 0.552,
+      "expectancy_r": 0.648,
+      "ci_low": 0.122,
+      "ci_high": 1.173,
+      "total_r": 18.78,
+      "net_dollars": 6844.5,
+      "max_dd_r": 3.11,
+      "profit_factor": 2.41
+    },
+    {
+      "variant": "with/limit mid stop=gap_far 2R",
+      "entry_style": "mid",
+      "cutoff": "11:00",
+      "min_gap": 0.0,
+      "trades": 29,
+      "win_rate": 0.552,
+      "expectancy_r": 0.648,
+      "ci_low": 0.122,
+      "ci_high": 1.173,
+      "total_r": 18.78,
+      "net_dollars": 6844.5,
+      "max_dd_r": 3.11,
+      "profit_factor": 2.41
+    },
+    {
+      "variant": "with/limit mid stop=gap_far 3R",
+      "entry_style": "mid",
+      "cutoff": "11:00",
+      "min_gap": 5.0,
+      "trades": 29,
+      "win_rate": 0.414,
+      "expectancy_r": 0.644,
+      "ci_low": -0.052,
+      "ci_high": 1.341,
+      "total_r": 18.67,
+      "net_dollars": 4474.5,
+      "max_dd_r": 5.1,
+      "profit_factor": 2.075
+    },
+    {
+      "variant": "with/limit proximal stop=gap_far 2R",
+      "entry_style": "proximal",
+      "cutoff": "11:00",
+      "min_gap": 5.0,
+      "trades": 36,
+      "win_rate": 0.528,
+      "expectancy_r": 0.577,
+      "ci_low": 0.075,
+      "ci_high": 1.079,
+      "total_r": 20.77,
+      "net_dollars": 7193.0,
+      "max_dd_r": 3.06,
+      "profit_factor": 2.206
+    },
+    {
+      "variant": "with/limit mid stop=gap_far 1.5R",
+      "entry_style": "mid",
+      "cutoff": "11:00",
+      "min_gap": 5.0,
+      "trades": 29,
+      "win_rate": 0.621,
+      "expectancy_r": 0.543,
+      "ci_low": 0.105,
+      "ci_high": 0.98,
+      "total_r": 15.76,
+      "net_dollars": 6494.5,
+      "max_dd_r": 3.11,
+      "profit_factor": 2.396
+    },
+    {
+      "variant": "with/limit proximal stop=gap_far 1R",
+      "entry_style": "proximal",
+      "cutoff": "11:00",
+      "min_gap": 5.0,
+      "trades": 36,
+      "win_rate": 0.694,
+      "expectancy_r": 0.384,
+      "ci_low": 0.102,
+      "ci_high": 0.664,
+      "total_r": 13.81,
+      "net_dollars": 9598.0,
+      "max_dd_r": 2.06,
+      "profit_factor": 2.234
+    },
+    {
+      "variant": "with/limit mid stop=gap_far 2R",
+      "entry_style": "mid",
+      "cutoff": "11:00",
+      "min_gap": 20.0,
+      "trades": 22,
+      "win_rate": 0.455,
+      "expectancy_r": 0.36,
+      "ci_low": -0.195,
+      "ci_high": 1.043,
+      "total_r": 7.91,
+      "net_dollars": 3951.0,
+      "max_dd_r": 5.09,
+      "profit_factor": 1.65
+    },
+    {
+      "variant": "with/limit proximal stop=gap_far 1.5R",
+      "entry_style": "proximal",
+      "cutoff": "11:00",
+      "min_gap": 5.0,
+      "trades": 36,
+      "win_rate": 0.528,
+      "expectancy_r": 0.312,
+      "ci_low": -0.106,
+      "ci_high": 0.729,
+      "total_r": 11.22,
+      "net_dollars": 2513.0,
+      "max_dd_r": 3.06,
+      "profit_factor": 1.651
+    },
+    {
+      "variant": "with/limit distal stop=pattern 1R",
+      "entry_style": "distal",
+      "cutoff": "11:00",
+      "min_gap": 5.0,
+      "trades": 26,
+      "win_rate": 0.654,
+      "expectancy_r": 0.306,
+      "ci_low": -0.079,
+      "ci_high": 0.615,
+      "total_r": 7.96,
+      "net_dollars": 8563.0,
+      "max_dd_r": 3.01,
+      "profit_factor": 1.881
+    },
+    {
+      "variant": "with/limit distal stop=pattern 3R",
+      "entry_style": "distal",
+      "cutoff": "11:00",
+      "min_gap": 5.0,
+      "trades": 26,
+      "win_rate": 0.346,
+      "expectancy_r": 0.257,
+      "ci_low": -0.384,
+      "ci_high": 0.953,
+      "total_r": 6.69,
+      "net_dollars": 10313.0,
+      "max_dd_r": 6.42,
+      "profit_factor": 1.395
+    },
+    {
+      "variant": "with/limit mid stop=gap_far 1R",
+      "entry_style": "mid",
+      "cutoff": "11:00",
+      "min_gap": 5.0,
+      "trades": 29,
+      "win_rate": 0.621,
+      "expectancy_r": 0.233,
+      "ci_low": -0.119,
+      "ci_high": 0.583,
+      "total_r": 6.75,
+      "net_dollars": 3399.5,
+      "max_dd_r": 3.12,
+      "profit_factor": 1.598
+    },
+    {
+      "variant": "with/limit mid stop=pattern 1R",
+      "entry_style": "mid",
+      "cutoff": "11:00",
+      "min_gap": 5.0,
+      "trades": 29,
+      "win_rate": 0.552,
+      "expectancy_r": 0.104,
+      "ci_low": -0.244,
+      "ci_high": 0.45,
+      "total_r": 3.02,
+      "net_dollars": 549.5,
+      "max_dd_r": 3.02,
+      "profit_factor": 1.233
+    },
+    {
+      "variant": "with/limit distal stop=pattern 2R",
+      "entry_style": "distal",
+      "cutoff": "11:00",
+      "min_gap": 5.0,
+      "trades": 26,
+      "win_rate": 0.346,
+      "expectancy_r": -0.001,
+      "ci_low": -0.527,
+      "ci_high": 0.535,
+      "total_r": -0.03,
+      "net_dollars": 508.0,
+      "max_dd_r": 6.13,
+      "profit_factor": 0.998
+    },
+    {
+      "variant": "with/limit mid stop=pattern 3R",
+      "entry_style": "mid",
+      "cutoff": "11:00",
+      "min_gap": 5.0,
+      "trades": 29,
+      "win_rate": 0.241,
+      "expectancy_r": -0.227,
+      "ci_low": -0.719,
+      "ci_high": 0.331,
+      "total_r": -6.58,
+      "net_dollars": -10480.5,
+      "max_dd_r": 9.34,
+      "profit_factor": 0.7
+    },
+    {
+      "variant": "with/limit mid stop=pattern 2R",
+      "entry_style": "mid",
+      "cutoff": "11:00",
+      "min_gap": 5.0,
+      "trades": 29,
+      "win_rate": 0.276,
+      "expectancy_r": -0.248,
+      "ci_low": -0.676,
+      "ci_high": 0.218,
+      "total_r": -7.19,
+      "net_dollars": -12730.5,
+      "max_dd_r": 8.18,
+      "profit_factor": 0.656
+    },
+    {
+      "variant": "with/stop pattern-break stop=gap_far 1R",
+      "entry_style": "mid",
+      "cutoff": "11:00",
+      "min_gap": 5.0,
+      "trades": 38,
+      "win_rate": 0.368,
+      "expectancy_r": -0.27,
+      "ci_low": -0.586,
+      "ci_high": 0.047,
+      "total_r": -10.24,
+      "net_dollars": -11341.0,
+      "max_dd_r": 12.16,
+      "profit_factor": 0.577
+    },
+    {
+      "variant": "with/stop pattern-break stop=gap_far 2R",
+      "entry_style": "mid",
+      "cutoff": "11:00",
+      "min_gap": 5.0,
+      "trades": 38,
+      "win_rate": 0.263,
+      "expectancy_r": -0.329,
+      "ci_low": -0.676,
+      "ci_high": 0.07,
+      "total_r": -12.5,
+      "net_dollars": -14646.0,
+      "max_dd_r": 15.46,
+      "profit_factor": 0.545
+    },
+    {
+      "variant": "fade/stop into-gap stop=gap_far 2R",
+      "entry_style": "mid",
+      "cutoff": "11:00",
+      "min_gap": 5.0,
+      "trades": 37,
+      "win_rate": 0.135,
+      "expectancy_r": -0.603,
+      "ci_low": -0.928,
+      "ci_high": -0.278,
+      "total_r": -22.32,
+      "net_dollars": -27886.5,
+      "max_dd_r": 22.32,
+      "profit_factor": 0.309
+    },
+    {
+      "variant": "with/stop pattern-break stop=gap_far 3R",
+      "entry_style": "mid",
+      "cutoff": "11:00",
+      "min_gap": 5.0,
+      "trades": 38,
+      "win_rate": 0.158,
+      "expectancy_r": -0.604,
+      "ci_low": -0.89,
+      "ci_high": -0.254,
+      "total_r": -22.93,
+      "net_dollars": -31636.0,
+      "max_dd_r": 22.93,
+      "profit_factor": 0.272
+    }
+  ]
+}
